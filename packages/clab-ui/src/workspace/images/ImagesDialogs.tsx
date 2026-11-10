@@ -17,6 +17,7 @@ import Typography from "@mui/material/Typography";
 import {
   errorMessage,
   formatSize,
+  keptMissingImage,
   isValidKind,
   isValidTag,
   isValidVersion,
@@ -297,6 +298,7 @@ export function SyncDialog({ client, onClose, onApplied }: {
     return () => { cancelled = true; };
   }, [client]);
   const changes = preview ? templateChanges(preview.changes) : [];
+  const keptMissing = preview ? keptMissingImage(preview.skipped) : [];
   const apply = () => {
     setBusy(true);
     client.syncTemplates(false)
@@ -332,7 +334,35 @@ export function SyncDialog({ client, onClose, onApplied }: {
                 >
                   {CHANGE_LABELS[change.action] ?? change.action}
                 </Typography>
-                <Typography variant="body2" sx={MONO_SX}>{change.name}</Typography>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="body2" sx={MONO_SX}>{change.name}</Typography>
+                  {change.action === "updated" && change.kept.length > 0 ? (
+                    <Typography variant="caption" data-testid="images-sync-kept" sx={{ color: "text.secondary" }}>
+                      keeps your {change.kept.join(", ")}
+                    </Typography>
+                  ) : null}
+                </Box>
+              </Box>
+            ))}
+          </Box>
+        ) : null}
+        {keptMissing.length > 0 ? (
+          <Box component="ul" data-testid="images-sync-kept-missing" sx={{ m: 0, mt: 1.5, p: 0, border: 1, borderColor: "divider", borderRadius: "6px" }}>
+            {keptMissing.map((name) => (
+              <Box
+                key={name}
+                component="li"
+                data-testid="images-sync-skipped"
+                data-name={name}
+                sx={{ listStyle: "none", display: "flex", gap: 1.5, px: 1.5, py: 0.75, "& + &": { borderTop: 1, borderColor: "divider" } }}
+              >
+                <Typography variant="caption" sx={{ width: 56, flexShrink: 0, fontWeight: 600, pt: "2px", color: "warning.main" }}>Kept</Typography>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="body2" sx={MONO_SX}>{name}</Typography>
+                  <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                    Kept as you edited it, but its image is missing on this host. Select the template, then use Find this image.
+                  </Typography>
+                </Box>
               </Box>
             ))}
           </Box>

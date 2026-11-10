@@ -194,12 +194,27 @@ test.describe("Images view", () => {
     await expect(page.getByTestId("images-template-remove")).toBeVisible();
   });
 
-  test("sync previews two changes and applying syncs and reloads templates", async ({ page }) => {
+  test("customized templates are marked, and the sync preview names the kept fields and the kept edited template", async ({ page }) => {
+    await openImages(page);
+    await expect(templateRow(page, "cisco-vios-159-3.M3")).toHaveAttribute("data-customized", "true");
+    await expect(templateRow(page, "srl")).toHaveAttribute("data-customized", "false");
+    await expect(page.getByTestId("images-template-customized")).toHaveCount(2);
+    await expect(page.getByTestId("images-job").and(page.locator('[data-op="build"]'))).toContainText("kept your interfacePattern, icon");
+    await page.getByTestId("images-sync-button").click();
+    await expect(page.getByTestId("images-sync-change")).toHaveCount(3);
+    await expect(page.getByTestId("images-sync-kept")).toHaveText("keeps your interfacePattern");
+    const skipped = page.getByTestId("images-sync-skipped");
+    await expect(skipped).toHaveCount(1);
+    await expect(skipped).toContainText("arista-veos-4.32.0F");
+    await expect(skipped).toContainText("image is missing");
+  });
+
+  test("sync previews three changes and applying syncs and reloads templates", async ({ page }) => {
     await openImages(page);
     await page.getByTestId("images-sync-button").click();
     const dialog = page.getByTestId("images-sync-dialog");
     await expect(dialog).toBeVisible();
-    await expect(page.getByTestId("images-sync-change")).toHaveCount(2);
+    await expect(page.getByTestId("images-sync-change")).toHaveCount(3);
     expect(await calls(page)).toContain("syncTemplates [true]");
     expect(await calls(page)).not.toContain("syncTemplates [false]");
     await page.getByTestId("images-sync-apply").click();
@@ -266,7 +281,7 @@ test("screenshots", async ({ page }) => {
     await page.keyboard.press("Escape");
 
     await page.getByTestId("images-sync-button").click();
-    await expect(page.getByTestId("images-sync-change")).toHaveCount(2);
+    await expect(page.getByTestId("images-sync-change")).toHaveCount(3);
     await shot("images-sync-preview", theme);
 
     await openImages(page, `theme=${theme}&state=unavailable`);

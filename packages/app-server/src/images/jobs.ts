@@ -14,7 +14,7 @@ import type { AsyncMutex } from "./mutex.ts";
 import { chownToRunAs, mkdirForRunAs } from "./ownership.ts";
 import type { Redactor } from "./redact.ts";
 import { openOutputFile, signalGroup, spawnClimg } from "./runner.ts";
-import { isObjectValue, parseJobDoc, parseTemplateResult } from "./shapes.ts";
+import { isObjectValue, keptFields, keptList, parseJobDoc, parseTemplateResult } from "./shapes.ts";
 import { validateEnum, validateFileName, validateJobId, validateRef } from "./validate.ts";
 
 const JOB_OPS = ["pull", "build", "add"] as const;
@@ -341,7 +341,8 @@ export class JobRegistry {
       const doc = await this.options.mutex.run(async () =>
         parseTemplateResult(await this.options.client.json(nodetplArgs(this.options.nodetplFile, "add", target)))
       );
-      return { ...job, nodetpl: { name, written: doc.changes.length > 0 } };
+      const kept = keptFields(doc.changes) ?? keptList(template?.kept);
+      return { ...job, nodetpl: { name, written: doc.changes.length > 0, ...(kept ? { kept } : {}) } };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.options.log?.(`job ${job.id}: node template not written: ${message}`);

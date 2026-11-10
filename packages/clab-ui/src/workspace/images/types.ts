@@ -91,6 +91,8 @@ export interface ImagesTemplate {
   icon?: string;
   /** Created by `climg`; only these can be removed here. */
   managed: boolean;
+  /** Managed and edited by the user; `climg` keeps the edited fields when it regenerates the template. */
+  customized?: boolean;
   /** Whether the image is on the host; null when `climg` does not track it. */
   imagePresent: boolean | null;
 }
@@ -140,7 +142,7 @@ export interface ImagesJob {
   updatedAt: string;
   finishedAt?: string;
   exitCode?: number | null;
-  nodetpl?: { name?: string; written: boolean; error?: string };
+  nodetpl?: { name?: string; written: boolean; error?: string; kept?: string[] };
   cancelRequested?: boolean;
 }
 

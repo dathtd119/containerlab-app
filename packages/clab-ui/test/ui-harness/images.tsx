@@ -67,8 +67,8 @@ const fixtureRecords: Fixture[] = [
 const records: Fixture[] = state === "empty" ? [] : fixtureRecords.map((record) => ({ ...record }));
 
 const templates: ImagesTemplate[] = [
-  { name: "cisco-vios-159-3.M3", kind: "cisco_vios", image: "vrnetlab/cisco_vios:159-3.M3", icon: "router", managed: true, imagePresent: true },
-  { name: "arista-veos-4.32.0F", kind: "arista_veos", image: "vrnetlab/arista_veos:4.32.0F", managed: true, imagePresent: false },
+  { name: "cisco-vios-159-3.M3", kind: "cisco_vios", image: "vrnetlab/cisco_vios:159-3.M3", icon: "router", managed: true, customized: true, imagePresent: true },
+  { name: "arista-veos-4.32.0F", kind: "arista_veos", image: "vrnetlab/arista_veos:4.32.0F", managed: true, customized: true, imagePresent: false },
   { name: "srl", kind: "nokia_srlinux", image: "ghcr.io/nokia/srlinux:latest", managed: false, imagePresent: null }
 ];
 
@@ -246,7 +246,7 @@ if (state === "ready" || state === "nokvm") {
       startedAt: iso(-600_000),
       updatedAt: iso(-300_000),
       finishedAt: iso(-300_000),
-      nodetpl: { name: "juniper-vjunosrouter-23.4R1", written: true }
+      nodetpl: { name: "juniper-vjunosrouter-23.4R1", written: true, kept: ["interfacePattern", "icon"] }
     }
   );
 }
@@ -324,8 +324,10 @@ function createFakeClient(): ImagesClient {
       const result = templateResult("sync", dryRun, {
         changes: [
           { action: "created", name: "juniper-vjunosrouter-23.4R1" },
-          { action: "deleted", name: "cisco-csr1000v-17.3" }
+          { action: "deleted", name: "cisco-csr1000v-17.3" },
+          { action: "updated", name: "cisco-vios-159-3.M3", kept: ["interfacePattern"] }
         ],
+        skipped: [{ name: "arista-veos-4.32.0F", reason: "edited by user; image missing" }],
         added: ["juniper-vjunosrouter-23.4R1"],
         removed: ["cisco-csr1000v-17.3"]
       });

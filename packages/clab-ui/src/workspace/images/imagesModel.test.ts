@@ -7,6 +7,9 @@ import {
   canPull,
   formatSize,
   freeDiskBytes,
+  keptFields,
+  keptMissingImage,
+  keptText,
   localFileName,
   recordRef,
   templateChanges,
@@ -111,7 +114,41 @@ test("unavailableOf returns the info of an unavailable error only", () => {
 test("templateChanges drops malformed entries", () => {
   const changes = [{ action: "created", name: "a" }, null, "x", { action: "deleted" }, { name: "b" }, { action: 1, name: "c" }, { action: "deleted", name: "d" }];
   assert.deepEqual(templateChanges(changes), [
-    { action: "created", name: "a" },
-    { action: "deleted", name: "d" }
+    { action: "created", name: "a", kept: [] },
+    { action: "deleted", name: "d", kept: [] }
   ]);
+});
+
+test("templateChanges carries the kept fields of an updated template and ignores a malformed list", () => {
+  assert.deepEqual(
+    templateChanges([
+      { action: "updated", name: "a", kept: ["interfacePattern", "icon"] },
+      { action: "updated", name: "b" },
+      { action: "updated", name: "c", kept: "icon" },
+      { action: "updated", name: "d", kept: ["x", 3, ""] }
+    ]),
+    [
+      { action: "updated", name: "a", kept: ["interfacePattern", "icon"] },
+      { action: "updated", name: "b", kept: [] },
+      { action: "updated", name: "c", kept: [] },
+      { action: "updated", name: "d", kept: ["x"] }
+    ]
+  );
+});
+
+test("keptText and keptFields phrase what climg kept", () => {
+  assert.equal(keptText(["interfacePattern"]), "kept your interfacePattern");
+  assert.equal(keptText(["a", "b"]), "kept your a, b");
+  assert.equal(keptText([]), undefined);
+  assert.deepEqual(keptFields(undefined), []);
+});
+
+test("keptMissingImage picks the edited templates skipped for a missing image", () => {
+  const skipped = [
+    { name: "a", reason: "edited by user; image missing" },
+    { name: "b", reason: "other reason" },
+    null,
+    { reason: "edited by user; image missing" }
+  ];
+  assert.deepEqual(keptMissingImage(skipped), ["a"]);
 });

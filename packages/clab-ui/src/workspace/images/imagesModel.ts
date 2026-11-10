@@ -142,11 +142,33 @@ export function jobTitle(job: ImagesJob): string {
   return `${OP_LABELS[job.op]} ${job.ref ?? job.file ?? ""}`.trim();
 }
 
-/** A template change of a `nodetpl` result as one line: `created x`, `deleted y`. */
-export function templateChanges(changes: readonly unknown[]): Array<{ action: string; name: string }> {
+/** The `kept` list of a result item: the fields whose user values climg kept; empty when absent or malformed. */
+export function keptFields(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((field): field is string => typeof field === "string" && field !== "") : [];
+}
+
+/** `kept your interfacePattern, icon`; undefined when nothing was kept. */
+export function keptText(fields: readonly string[]): string | undefined {
+  return fields.length > 0 ? `kept your ${fields.join(", ")}` : undefined;
+}
+
+/** A template change of a `nodetpl` result as one line: `created x`, `deleted y`; `updated` ones carry the fields kept. */
+export function templateChanges(changes: readonly unknown[]): Array<{ action: string; name: string; kept: string[] }> {
   return changes.flatMap((change) => {
     if (typeof change !== "object" || change === null) return [];
-    const { action, name } = change as { action?: unknown; name?: unknown };
-    return typeof action === "string" && typeof name === "string" ? [{ action, name }] : [];
+    const { action, name, kept } = change as { action?: unknown; name?: unknown; kept?: unknown };
+    return typeof action === "string" && typeof name === "string" ? [{ action, name, kept: keptFields(kept) }] : [];
+  });
+}
+
+/** The reason climg gives for keeping an edited template whose image is gone. */
+const EDITED_IMAGE_MISSING = "edited by user; image missing";
+
+/** The skipped entries of a sync that are edited templates kept although their image is missing. */
+export function keptMissingImage(skipped: readonly unknown[]): string[] {
+  return skipped.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const { name, reason } = entry as { name?: unknown; reason?: unknown };
+    return typeof name === "string" && reason === EDITED_IMAGE_MISSING ? [name] : [];
   });
 }

@@ -138,3 +138,33 @@ test("ImageDetails disables pull with the blocked reason", () => {
   const open = details(record, []);
   assert.doesNotMatch(open.match(/<button[^>]*data-testid="images-pull-button"[^>]*>/)?.[0] ?? "", /disabled/);
 });
+
+test("TemplateList marks customized managed templates only, with an explanatory tooltip target", () => {
+  const list: ImagesTemplate[] = [
+    { name: "edited", kind: "cisco_iol", image: "iol:1", managed: true, customized: true, imagePresent: true },
+    { name: "plain", kind: "cisco_iol", image: "iol:2", managed: true, customized: false, imagePresent: true },
+    { name: "older-climg", kind: "cisco_iol", image: "iol:3", managed: true, imagePresent: true },
+    { name: "foreign", kind: "linux", managed: false, customized: true, imagePresent: null }
+  ];
+  const html = render(<TemplateList templates={list} loading={false} onSelect={noop} onSync={noop} />);
+  const rows = html.match(/<button[^>]*data-testid="images-template-row"[^>]*>.*?<\/button>/g) ?? [];
+  assert.equal(rows.length, 4);
+  assert.match(rows[0] ?? "", /data-customized="true"/);
+  assert.match(rows[0] ?? "", /data-testid="images-template-customized"[^>]*>customized</);
+  for (const row of rows.slice(1)) {
+    assert.match(row, /data-customized="false"/);
+    assert.doesNotMatch(row, /images-template-customized/);
+  }
+});
+
+test("JobsPanel shows the fields climg kept on the job result line", () => {
+  const withKept = baseJob({
+    id: "k", op: "pull", ref: "labhub:a", state: "succeeded", message: "ok",
+    nodetpl: { name: "tpl-a", written: true, kept: ["interfacePattern", "icon"] }
+  });
+  const html = render(<JobsPanel onCancel={noop} jobs={[withKept]} />);
+  assert.match(html, /Node Template tpl-a written · kept your interfacePattern, icon/);
+  const without = render(<JobsPanel onCancel={noop} jobs={[{ ...withKept, nodetpl: { name: "tpl-a", written: true } }]} />);
+  assert.match(without, /Node Template tpl-a written</);
+  assert.doesNotMatch(without, /kept your/);
+});

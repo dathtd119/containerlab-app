@@ -112,6 +112,8 @@ export interface ImagesTemplate {
   icon?: string;
   /** Created by `climg`; only these can be removed from the Images view. */
   managed: boolean;
+  /** Managed and edited by the user; `climg` keeps the edited fields when it regenerates the template. Absent for an older `climg`. */
+  customized?: boolean;
   /** Whether the image is on the host; null when `climg` does not track it. */
   imagePresent: boolean | null;
 }
@@ -173,7 +175,7 @@ export interface ImagesJob {
   finishedAt?: string;
   exitCode?: number | null;
   /** The Node Template step that follows a successful job. */
-  nodetpl?: { name?: string; written: boolean; error?: string };
+  nodetpl?: { name?: string; written: boolean; error?: string; kept?: string[] };
   cancelRequested?: boolean;
 }
 

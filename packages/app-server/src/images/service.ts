@@ -206,12 +206,14 @@ export class ImagesService {
     const templates: ImagesTemplate[] = stored.customNodes.map((node) => {
       const name = String(node.name ?? "");
       const image = typeof node.image === "string" ? node.image : undefined;
+      const customized = owned.get(name)?.customized;
       return {
         name,
         kind: String(node.kind ?? ""),
         ...(image !== undefined ? { image } : {}),
         ...(typeof node.icon === "string" ? { icon: node.icon } : {}),
         managed: owned.get(name)?.owned === true,
+        ...(customized !== undefined ? { customized } : {}),
         imagePresent: image === undefined || present === undefined || !image.startsWith("vrnetlab/") ? null : present.has(image)
       };
     });

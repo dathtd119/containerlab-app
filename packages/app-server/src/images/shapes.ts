@@ -136,6 +136,8 @@ export interface NodetplRow {
   image?: string;
   icon?: string;
   owned: boolean;
+  /** Owned by climg and edited by the user; absent for a climg that does not report it. */
+  customized?: boolean;
 }
 
 export function parseNodetplList(value: unknown): NodetplRow[] {
@@ -144,8 +146,26 @@ export function parseNodetplList(value: unknown): NodetplRow[] {
     kind: typeof row.kind === "string" ? row.kind : "",
     ...(typeof row.image === "string" ? { image: row.image } : {}),
     ...(typeof row.icon === "string" ? { icon: row.icon } : {}),
-    owned: row.owned === true
+    owned: row.owned === true,
+    ...(typeof row.customized === "boolean" ? { customized: row.customized } : {})
   }));
+}
+
+/** A `kept` list of strings; undefined when absent, empty or not a list (an older `climg`). */
+export function keptList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) return undefined;
+  return value.length > 0 ? (value as string[]) : undefined;
+}
+
+/** The fields kept by the `updated` change of a `nodetpl` result, if `climg` reports any. */
+export function keptFields(changes: readonly unknown[]): string[] | undefined {
+  for (const change of changes) {
+    if (isObject(change) && change.action === "updated") {
+      const kept = keptList(change.kept);
+      if (kept) return kept;
+    }
+  }
+  return undefined;
 }
 
 export function parseTemplateResult(value: unknown): ImagesTemplateResult {

@@ -5,7 +5,7 @@ import LinearProgress from "@mui/material/LinearProgress";
 import Typography from "@mui/material/Typography";
 
 import { MONO_FONT_FAMILY } from "../../theme/typography";
-import { jobTitle } from "./imagesModel";
+import { jobTitle, keptFields, keptText } from "./imagesModel";
 import { PaneTitle, StatusDot, type Tone } from "./imagesUi";
 import { isActiveJob } from "./jobsWatcher";
 import type { ImagesJob } from "./types";
@@ -49,7 +49,9 @@ function phaseText(job: ImagesJob): string {
 function templateNote(job: ImagesJob): string | undefined {
   if (job.state !== "succeeded" || !job.nodetpl) return undefined;
   if (job.nodetpl.error) return `Node Template not written: ${job.nodetpl.error}`;
-  return job.nodetpl.written && job.nodetpl.name ? `Node Template ${job.nodetpl.name} written` : undefined;
+  const kept = keptText(keptFields(job.nodetpl.kept));
+  if (!job.nodetpl.written || !job.nodetpl.name) return undefined;
+  return `Node Template ${job.nodetpl.name} written${kept ? ` · ${kept}` : ""}`;
 }
 
 function JobRow({ job, onCancel }: { job: ImagesJob; onCancel: (job: ImagesJob) => void }) {

@@ -321,6 +321,58 @@ test("templates: list joins climg's managed flag with the store; remove is for m
   assert.ok(!(await harness.store.getCustomNodes()).customNodes.some((node) => node.name === managed.name));
 });
 
+test("templates: customized comes from climg and is absent for an older climg", async (t) => {
+  const harness = await createHarness(t);
+  await harness.service.addTemplate("vrnetlab/cisco_vios:159-3.M3");
+  const plain = (await harness.service.templates()).templates.find((template) => template.managed)!;
+  assert.equal(plain.customized, false);
+
+  const edited = await createHarness(t);
+  await edited.service.addTemplate("vrnetlab/cisco_vios:159-3.M3");
+  const name = (await edited.service.templates()).templates[0].name;
+  const custom = await createHarness(t, { env: { FAKE_CLIMG_CUSTOMIZED: name } });
+  await custom.store.replaceCustomNodes((await edited.store.getCustomNodes()).customNodes);
+  await fs.writeFile(`${custom.nodetplFile}.owned.json`, JSON.stringify([name]));
+  assert.equal((await custom.service.templates()).templates[0].customized, true);
+
+  const legacy = await createHarness(t, { env: { FAKE_CLIMG_LEGACY: "1" } });
+  await legacy.service.addTemplate("vrnetlab/cisco_vios:159-3.M3");
+  const row = (await legacy.service.templates()).templates.find((template) => template.managed)!;
+  assert.equal("customized" in row, false);
+});
+
+test("template sync passes kept fields and skipped entries through, and tolerates their absence", async (t) => {
+  const harness = await createHarness(t, {
+    env: { FAKE_CLIMG_SYNC_KEPT: "tpl-a:interfacePattern,icon", FAKE_CLIMG_SYNC_SKIPPED: "tpl-b" }
+  });
+  const preview = await harness.service.syncTemplates(true);
+  assert.deepEqual(preview.changes, [{ action: "updated", name: "tpl-a", kept: ["interfacePattern", "icon"] }]);
+  assert.deepEqual(preview.skipped, [{ name: "tpl-b", reason: "edited by user; image missing" }]);
+
+  const legacy = await createHarness(t, { env: { FAKE_CLIMG_SYNC_KEPT: "tpl-a:icon", FAKE_CLIMG_LEGACY: "1" } });
+  assert.deepEqual((await legacy.service.syncTemplates(true)).changes, [{ action: "updated", name: "tpl-a" }]);
+});
+
+test("a job result carries the kept fields of an updated template, and none for an older climg", async (t) => {
+  const kept = await createHarness(t, { env: { FAKE_CLIMG_KEPT: "interfacePattern" } });
+  const started = await kept.service.jobs.start({ op: "pull", ref: "labhub:vios-1" });
+  const ended = await untilEnded(kept, started.id);
+  assert.deepEqual(ended.nodetpl?.kept, ["interfacePattern"]);
+
+  const fromResult = await createHarness(t, { env: { FAKE_CLIMG_JOB_KEPT: "icon" } });
+  const second = await untilEnded(fromResult, (await fromResult.service.jobs.start({ op: "pull", ref: "labhub:vios-1" })).id);
+  assert.deepEqual(second.nodetpl?.kept, ["icon"]);
+
+  const legacy = await createHarness(t, { env: { FAKE_CLIMG_KEPT: "interfacePattern", FAKE_CLIMG_LEGACY: "1" } });
+  const third = await untilEnded(legacy, (await legacy.service.jobs.start({ op: "pull", ref: "labhub:vios-1" })).id);
+  assert.equal(third.state, "succeeded");
+  assert.equal(third.nodetpl !== undefined && "kept" in third.nodetpl, false);
+
+  const plain = await createHarness(t);
+  const fourth = await untilEnded(plain, (await plain.service.jobs.start({ op: "pull", ref: "labhub:vios-1" })).id);
+  assert.equal(fourth.nodetpl !== undefined && "kept" in fourth.nodetpl, false);
+});
+
 test("template sync with dry-run changes nothing", async (t) => {
   const harness = await createHarness(t);
   const preview = await harness.service.syncTemplates(true);

@@ -88,11 +88,21 @@ async function nodetpl() {
     fs.writeFileSync(ownedFile(file), JSON.stringify(nextOwned));
   };
   if (action === "list") {
-    return out(current.map((c) => ({ name: c.name, kind: c.kind, image: c.image ?? "-", icon: c.icon ?? "-", owned: owned.includes(c.name) })));
+    // FAKE_CLIMG_CUSTOMIZED=a,b marks owned templates as user-edited; FAKE_CLIMG_LEGACY=1 omits the field like an older climg.
+    const customized = (env.FAKE_CLIMG_CUSTOMIZED ?? "").split(",").filter(Boolean);
+    return out(current.map((c) => ({
+      name: c.name, kind: c.kind, image: c.image ?? "-", icon: c.icon ?? "-", owned: owned.includes(c.name),
+      ...(env.FAKE_CLIMG_LEGACY ? {} : { customized: owned.includes(c.name) && customized.includes(c.name) })
+    })));
   }
   if (action === "add") {
     const e = templateEntry(target.replace(/^(labhub|local):/, ""));
     if (target === "labhub:missing") fail("not_found", "no such image");
+    // FAKE_CLIMG_KEPT=a,b: add reports the template "updated", keeping those fields.
+    const keptFields = (env.FAKE_CLIMG_KEPT ?? "").split(",").filter(Boolean);
+    if (keptFields.length) {
+      return out(result([{ action: "updated", name: e.name, ...(env.FAKE_CLIMG_LEGACY ? {} : { kept: keptFields }) }], { template: e }));
+    }
     const changes = current.some((c) => c.name === e.name) ? [] : [{ action: "created", name: e.name }];
     if (changes.length) await commit([...current, e], [...owned, e.name]);
     return out(result(changes, { template: e }));
@@ -104,7 +114,12 @@ async function nodetpl() {
   }
   if (action === "sync") {
     const stale = owned.filter((n) => !current.some((c) => c.name === n));
-    return out(result(stale.map((name) => ({ action: "deleted", name }))));
+    const changes = stale.map((name) => ({ action: "deleted", name }));
+    // FAKE_CLIMG_SYNC_KEPT=name:a,b updates that template keeping fields; FAKE_CLIMG_SYNC_SKIPPED=name reports an edited template whose image is gone.
+    const [keptName, keptList] = (env.FAKE_CLIMG_SYNC_KEPT ?? "").split(":");
+    if (keptName) changes.push({ action: "updated", name: keptName, ...(env.FAKE_CLIMG_LEGACY ? {} : { kept: keptList.split(",") }) });
+    const skipped = env.FAKE_CLIMG_SYNC_SKIPPED ? [{ name: env.FAKE_CLIMG_SYNC_SKIPPED, reason: "edited by user; image missing" }] : [];
+    return out(result(changes, { skipped }));
   }
   return fail("error", `unknown nodetpl action ${action}`);
 }
@@ -120,6 +135,8 @@ function writeJobFile(doc) {
 async function job() {
   const ref = positionals[0];
   const result = { ref, status: "built", tag: "vrnetlab/cisco_vios:159-3.M3", nodetpl: { name: templateEntry("vrnetlab/cisco_vios:159-3.M3").name, written: false } };
+  // FAKE_CLIMG_JOB_KEPT=a,b: the result reports an updated template that kept those fields.
+  if (env.FAKE_CLIMG_JOB_KEPT) Object.assign(result.nodetpl, { action: "updated", kept: env.FAKE_CLIMG_JOB_KEPT.split(",") });
   writeJobFile({ state: "running", phase: "download", pct: 10, message: "working", log: [`start ${PASSWORD}`] });
   process.on("SIGTERM", () => {
     writeJobFile({ state: "cancelled", phase: "build", pct: 10, message: "cancelled" });

@@ -16,6 +16,8 @@ export function presenceOf(template: ImagesTemplate): { key: "true" | "false" | 
   return { key: "unknown", tone: "default", label: "Image not tracked by climg" };
 }
 
+const CUSTOMIZED_TIP = "You edited this template. climg keeps your edited fields when it regenerates the template.";
+
 function TemplateRow({ template, selected, onSelect }: {
   template: ImagesTemplate;
   selected: boolean;
@@ -28,6 +30,7 @@ function TemplateRow({ template, selected, onSelect }: {
         data-testid="images-template-row"
         data-name={template.name}
         data-managed={String(template.managed)}
+        data-customized={String(template.managed && template.customized === true)}
         data-present={presence.key}
         aria-current={selected ? "true" : undefined}
         onClick={() => onSelect(template)}
@@ -57,6 +60,21 @@ function TemplateRow({ template, selected, onSelect }: {
               >
                 climg
               </Typography>
+            ) : null}
+            {template.managed && template.customized === true ? (
+              <Tooltip title={CUSTOMIZED_TIP}>
+                <Typography
+                  component="span"
+                  variant="caption"
+                  data-testid="images-template-customized"
+                  sx={{
+                    flexShrink: 0, px: 0.5, lineHeight: "16px", borderRadius: "4px", fontSize: 10.5, fontWeight: 600, letterSpacing: "0.02em",
+                    color: "warning.main", border: 1, borderColor: "currentColor"
+                  }}
+                >
+                  customized
+                </Typography>
+              </Tooltip>
             ) : null}
           </Box>
           <Typography variant="caption" component="p" noWrap title={template.image} sx={{ color: "text.secondary", ...MONO_SX }}>
