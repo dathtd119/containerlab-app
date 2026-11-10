@@ -75,7 +75,8 @@ const workspaces: Record<string, WorkspaceProjectConfig> = {
     entry: ["src/index.ts"]
   },
   "packages/app-server": {
-    entry: ["src/**/*.test.ts"],
+    // The fake climg is spawned by the Images tests.
+    entry: ["src/**/*.test.ts", "src/images/fixtures/fake-climg.mjs"],
     // The TLS certificate generator invokes the operating system's OpenSSL.
     ignoreBinaries: ["openssl"]
   },
