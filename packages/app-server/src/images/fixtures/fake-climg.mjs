@@ -11,7 +11,7 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 if (env.FAKE_CLIMG_LOG) {
   fs.appendFileSync(
     env.FAKE_CLIMG_LOG,
-    `${JSON.stringify({ argv, pid: process.pid, env: Object.keys(env).sort(), uid: process.getuid?.() })}\n`
+    `${JSON.stringify({ argv, pid: process.pid, env: Object.keys(env).sort(), uid: process.getuid?.(), gid: process.getgid?.() })}\n`
   );
 }
 
