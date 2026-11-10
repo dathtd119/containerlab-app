@@ -1,0 +1,117 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  blockedReason,
+  canBuild,
+  canPull,
+  formatSize,
+  freeDiskBytes,
+  localFileName,
+  recordRef,
+  templateChanges,
+  unavailableOf,
+  uploadProblem
+} from "./imagesModel";
+import type { ImageRecord, ImagesDoctorCheck } from "./types";
+
+const record = (fields: Partial<ImageRecord>): ImageRecord => ({ key: "labhub:x", source: "labhub", status: "available", ...fields });
+const check = (name: string, status: string, detail = ""): ImagesDoctorCheck => ({ check: name, status, detail });
+
+test("recordRef returns a valid key as is", () => {
+  assert.equal(recordRef(record({ key: "labhub:vios-159-3.M3" })), "labhub:vios-159-3.M3");
+});
+
+test("recordRef uses #id for a LabHub record whose key has spaces", () => {
+  assert.equal(recordRef(record({ key: "labhub:Cisco IOSv L2 2020", id: 77 })), "#77");
+});
+
+test("recordRef falls back to a valid docker tag, else undefined", () => {
+  assert.equal(recordRef(record({ key: "labhub:Cisco IOSv L2 2020", tag: "vrnetlab/cisco_iosv:2020" })), "vrnetlab/cisco_iosv:2020");
+  assert.equal(recordRef(record({ key: "labhub:Cisco IOSv L2 2020", tag: "Bad Tag!" })), undefined);
+  assert.equal(recordRef(record({ key: "labhub:Cisco IOSv L2 2020" })), undefined);
+});
+
+test("recordRef never returns an option-like key", () => {
+  assert.equal(recordRef(record({ key: "--force", source: "local" })), undefined);
+  assert.equal(recordRef(record({ key: "-rf", source: "local", tag: "--force" })), undefined);
+  assert.notEqual(recordRef(record({ key: "--force", id: 5 })), "--force");
+});
+
+test("a failed /dev/kvm check blocks pull and build, naming it, but not upload or templates", () => {
+  const checks = [check("/dev/kvm", "FAIL", "missing"), check("docker", "ok")];
+  assert.match(blockedReason(checks, "pull") ?? "", /\/dev\/kvm/);
+  assert.match(blockedReason(checks, "build") ?? "", /\/dev\/kvm/);
+  assert.equal(blockedReason(checks, "upload"), undefined);
+  assert.equal(blockedReason(checks, "templates"), undefined);
+});
+
+test("pull is blocked when every mirror fails, not when one answers", () => {
+  assert.ok(blockedReason([check("mirror a", "FAIL"), check("mirror b", "FAIL")], "pull"));
+  assert.equal(blockedReason([check("mirror a", "FAIL"), check("mirror b", "ok")], "pull"), undefined);
+});
+
+test("warn never blocks and missing checks do not block", () => {
+  const warn = [check("/dev/kvm", "warn"), check("disk", "warn"), check("mirror a", "warn")];
+  for (const action of ["pull", "build", "upload", "templates"] as const) {
+    assert.equal(blockedReason(warn, action), undefined);
+    assert.equal(blockedReason(undefined, action), undefined);
+  }
+});
+
+test("freeDiskBytes parses the disk check", () => {
+  assert.equal(freeDiskBytes([check("disk", "ok", "412.0 GB free, floor 20.0 GB")]), 412e9);
+  assert.equal(freeDiskBytes([check("docker", "ok")]), undefined);
+  assert.equal(freeDiskBytes(undefined), undefined);
+});
+
+test("formatSize uses decimal units", () => {
+  assert.equal(formatSize(57_000_000), "57.0 MB");
+  assert.equal(formatSize(undefined), "–");
+  assert.equal(formatSize(null), "–");
+  assert.equal(formatSize(512), "512 B");
+});
+
+test("uploadProblem checks extension, name and size", () => {
+  const limits = { extensions: [".qcow2", ".tar.gz", ".vmdk"], maxBytes: 1_000_000 };
+  assert.match(uploadProblem({ name: "a.iso", size: 1 }, limits) ?? "", /\.qcow2 \.tar\.gz \.vmdk/);
+  assert.ok(uploadProblem({ name: "../x.qcow2", size: 1 }, limits));
+  assert.ok(uploadProblem({ name: "a b.qcow2", size: 1 }, limits));
+  assert.match(uploadProblem({ name: "big.qcow2", size: 2_000_000 }, limits) ?? "", /larger than the upload limit/);
+  assert.equal(uploadProblem({ name: "vEOS64-lab-4.32.0F.qcow2", size: 500 }, limits), undefined);
+  assert.equal(uploadProblem({ name: "image.tar.gz", size: 500 }, limits), undefined);
+});
+
+test("localFileName comes from the path, else the key; only for local records", () => {
+  assert.equal(localFileName(record({ source: "local", key: "local:k", path: "/var/images/vEOS.qcow2" })), "vEOS.qcow2");
+  assert.equal(localFileName(record({ source: "local", key: "local:fallback.qcow2" })), "fallback.qcow2");
+  assert.equal(localFileName(record({ source: "labhub", key: "labhub:x", path: "/a/b.qcow2" })), undefined);
+  assert.equal(localFileName(record({ source: "local", key: "local:x", path: "/a/b c.qcow2" })), undefined);
+});
+
+test("canPull and canBuild depend on source and status", () => {
+  assert.equal(canPull(record({ source: "labhub", status: "available" })), true);
+  assert.equal(canPull(record({ source: "labhub", status: "built" })), true);
+  assert.equal(canPull(record({ source: "local", status: "available" })), false);
+  assert.equal(canPull(record({ source: "labhub", status: "unbuildable" })), false);
+  assert.equal(canBuild(record({ source: "local", status: "cached", key: "local:a.qcow2" })), true);
+  assert.equal(canBuild(record({ source: "local", status: "built", key: "local:a.qcow2" })), false);
+  assert.equal(canBuild(record({ source: "labhub", status: "cached", key: "labhub:a" })), false);
+  assert.equal(canBuild(record({ source: "local", status: "cached", key: "local:a b.qcow2" })), false);
+});
+
+test("unavailableOf returns the info of an unavailable error only", () => {
+  const unavailable = { reason: "unavailable" as const, detail: "x", configKeys: ["A"] };
+  assert.deepEqual(unavailableOf(Object.assign(new Error("404"), { unavailable })), unavailable);
+  assert.equal(unavailableOf(new Error("plain")), undefined);
+  assert.equal(unavailableOf(Object.assign(new Error("x"), { unavailable: { reason: "other", detail: "x" } })), undefined);
+  assert.equal(unavailableOf(null), undefined);
+});
+
+test("templateChanges drops malformed entries", () => {
+  const changes = [{ action: "created", name: "a" }, null, "x", { action: "deleted" }, { name: "b" }, { action: 1, name: "c" }, { action: "deleted", name: "d" }];
+  assert.deepEqual(templateChanges(changes), [
+    { action: "created", name: "a" },
+    { action: "deleted", name: "d" }
+  ]);
+});
