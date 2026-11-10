@@ -1,5 +1,4 @@
 import type {
-  BuiltImage,
   ImageRecord,
   ImagesIndexInfo,
   ImagesJob,
@@ -18,7 +17,6 @@ import { runtimeFetch } from "./backend";
 import { resolveRuntimeRequestUrl } from "./runtimeApi";
 
 export type {
-  BuiltImage,
   ImageRecord,
   ImagesIndexInfo,
   ImagesJob,
@@ -29,14 +27,13 @@ export type {
   ImagesStatusResponse,
   ImagesTemplateResult,
   ImagesTemplatesResponse,
-  ImagesUnavailable,
   ImagesUploadResponse
 };
 
 const BASE = "/api/runtime/images";
 
 /** A failed Images request; `unavailable` is set for the 404 that says the feature is off for this endpoint. */
-export class ImagesApiError extends Error {
+class ImagesApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
@@ -111,8 +108,6 @@ export function searchImages(query: ImagesSearchQuery, endpointId?: string, sign
 export const showImage = (ref: string, endpointId?: string): Promise<ImageRecord> =>
   getJson(`show?ref=${encodeURIComponent(ref)}`, endpointId);
 
-export const fetchBuiltImages = (endpointId?: string): Promise<BuiltImage[]> => getJson("images", endpointId);
-
 export const scanImageFiles = (endpointId?: string): Promise<ImagesScanFile[]> => getJson("scan", endpointId);
 
 export const fetchImagesTemplates = (endpointId?: string): Promise<ImagesTemplatesResponse> =>
@@ -131,9 +126,6 @@ export const startImagesJob = (job: ImagesJobRequest, endpointId?: string): Prom
   sendJson("POST", "jobs", job, endpointId);
 
 export const fetchImagesJobs = (endpointId?: string): Promise<ImagesJobsResponse> => getJson("jobs", endpointId);
-
-export const fetchImagesJob = (id: string, endpointId?: string): Promise<ImagesJob> =>
-  getJson(`jobs/${encodeURIComponent(id)}`, endpointId);
 
 export const cancelImagesJob = (id: string, endpointId?: string): Promise<ImagesJob> =>
   sendJson("POST", `jobs/${encodeURIComponent(id)}/cancel`, {}, endpointId);

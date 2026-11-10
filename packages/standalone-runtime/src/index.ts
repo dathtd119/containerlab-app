@@ -1,5 +1,4 @@
 export { mountStandaloneApp } from "./standaloneApp";
-export * from "./runtimeImagesApi";
 export {
   loadTerminalPreferences,
   persistTerminalPreferences,
