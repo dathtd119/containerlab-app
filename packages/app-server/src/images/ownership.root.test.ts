@@ -1,5 +1,5 @@
 // Runs only as root (uid 0): the chown and setuid paths cannot be exercised by an ordinary user.
-// Run it with `pnpm --filter @srl-labs/containerlab-app-server test:root` (a Docker container, see scripts/run-root-tests.sh).
+// Run it with `bash packages/app-server/scripts/run-root-tests.sh` (a Docker container).
 import assert from "node:assert/strict";
 // The test starts a child as another user to prove the files stay usable for it.
 // oxlint-disable-next-line no-restricted-imports

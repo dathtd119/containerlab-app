@@ -32,7 +32,6 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:unit": "node --import tsx --test 'src/**/*.test.ts'",
-    "test:root": "bash scripts/run-root-tests.sh",
     "lint": "oxlint --type-aware --import-plugin --react-plugin --jsx-a11y-plugin src"
   }
 }
