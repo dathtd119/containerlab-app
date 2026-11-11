@@ -15,7 +15,6 @@ import type { ImagesHandle } from "./setup.ts";
 import type { ImagesService } from "./service.ts";
 
 const BASE = "/api/runtime/images";
-const NO_BODY_LIMIT = Number.MAX_SAFE_INTEGER;
 
 type Locals = ReadonlyArray<{ url: string; images?: ImagesHandle }>;
 
@@ -61,7 +60,7 @@ export function registerImagesRoutes(
   // The upload body is the raw stream, read as it arrives. The parser belongs to this
   // plugin scope only, so no other route accepts octet-stream bodies.
   void app.register(async (scoped) => {
-    scoped.addContentTypeParser("application/octet-stream", { bodyLimit: NO_BODY_LIMIT }, (_request, payload, done) => {
+    scoped.addContentTypeParser("application/octet-stream", (_request, payload, done) => {
       done(null, payload);
     });
 
@@ -158,8 +157,10 @@ export function registerImagesRoutes(
       service.jobs.cancel((request.params as { id?: string }).id)
     );
 
-    // Fastify's own limit would refuse a large Content-Length; the per-server cap is checked by the upload manager.
-    scoped.put(`${BASE}/upload`, { bodyLimit: NO_BODY_LIMIT }, async (request, reply) => {
+    // No route bodyLimit: it would also lift the limit of the JSON and text parsers, which buffer the whole body
+    // before the session check. The octet-stream parser hands over the raw stream, which that limit does not
+    // apply to; the per-server size cap is checked by the upload manager.
+    scoped.put(`${BASE}/upload`, async (request, reply) => {
       const service = serviceFor(request, reply);
       if (!service) return reply;
       try {

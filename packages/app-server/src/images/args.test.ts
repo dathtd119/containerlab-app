@@ -4,6 +4,7 @@ import test from "node:test";
 import { RequestError } from "../runtimeProxy.ts";
 import { commandLine, jobArgs, nodetplArgs, searchArgs, showArgs } from "./args.ts";
 import { parseByteSize, resolveImagesConfig } from "./config.ts";
+import { climgEnvironment } from "./runner.ts";
 import { validateImageFileName, validateRef, validateTag } from "./validate.ts";
 
 const BAD_REFS = ["--force", "-x", "--tag=x", "vios; rm -rf /", "a b", "$(id)", "`id`", "a|b", "", "../x", "labhub:", "x\nforce", "-", "a/b/c/../d"];
@@ -88,4 +89,20 @@ test("configuration: byte sizes, run-as user and the disabled state", () => {
   assert.equal(resolveImagesConfig({ WEB_LOCAL_CLIMG_PATH: "climg" }, "WEB_LOCAL_", 1000).config, undefined, "relative path");
   assert.equal(resolveImagesConfig({ WEB_LOCAL_CLIMG_PATH: "/opt/climg", WEB_LOCAL_CLIMG_USER: "bds" }, "WEB_LOCAL_", 1000).config, undefined);
   assert.equal(resolveImagesConfig({ WEB_LOCAL_CLIMG_PATH: "/opt/climg", WEB_LOCAL_IMAGES_UPLOAD_MAX: "lots" }, "WEB_LOCAL_", 1000).config?.uploadMaxBytes, 20 * 1024 ** 3);
+});
+
+test("WEB_LOCAL_CLIMG_HOME is parsed, and a relative path is refused", () => {
+  const base = { WEB_LOCAL_CLIMG_PATH: "/opt/climg", WEB_LOCAL_CLIMG_USER: "1000:1000" };
+  assert.equal(resolveImagesConfig({ ...base, WEB_LOCAL_CLIMG_HOME: "/home/bds" }, "WEB_LOCAL_", 0).config?.home, "/home/bds");
+  assert.equal(resolveImagesConfig(base, "WEB_LOCAL_", 0).config?.home, undefined);
+  const refused = resolveImagesConfig({ ...base, WEB_LOCAL_CLIMG_HOME: "home/bds" }, "WEB_LOCAL_", 0);
+  assert.equal(refused.config, undefined);
+  assert.match(refused.problems[0], /WEB_LOCAL_CLIMG_HOME must be an absolute path/);
+});
+
+test("the configured HOME wins over the passwd home of the run-as user", () => {
+  const config = { climgPath: "/opt/climg", runAs: { uid: process.getuid?.() ?? 1000, gid: 1000 }, uploadMaxBytes: 1, maxJobs: 1 };
+  const fromPasswd = climgEnvironment(config, { PATH: "/bin", HOME: "/server/home" }).HOME;
+  assert.notEqual(fromPasswd, "/home/configured");
+  assert.equal(climgEnvironment({ ...config, home: "/home/configured" }, { PATH: "/bin", HOME: "/server/home" }).HOME, "/home/configured");
 });

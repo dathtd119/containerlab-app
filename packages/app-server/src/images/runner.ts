@@ -42,15 +42,15 @@ function homeOf(uid: number): string | undefined {
 }
 
 /**
- * The only environment `climg` gets: PATH, HOME of the run-as user, CLIMG_*,
+ * The only environment `climg` gets: PATH, HOME (the configured one, else that of the run-as user), CLIMG_*,
  * and the proxy variables. Nothing else is inherited from the server.
  */
-function climgEnvironment(config: ImagesConfig, source: NodeJS.ProcessEnv = process.env): Record<string, string> {
+export function climgEnvironment(config: ImagesConfig, source: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const env: Record<string, string> = {
     PATH: source.PATH?.trim() || DEFAULT_PATH,
     PYTHONUNBUFFERED: "1"
   };
-  const home = config.runAs ? (homeOf(config.runAs.uid) ?? source.HOME) : (source.HOME ?? os.homedir());
+  const home = config.home ?? (config.runAs ? (homeOf(config.runAs.uid) ?? source.HOME) : (source.HOME ?? os.homedir()));
   if (home) env.HOME = home;
   if (config.configPath) env.CLIMG_CONFIG = config.configPath;
   if (config.statePath) env.CLIMG_STATE = config.statePath;

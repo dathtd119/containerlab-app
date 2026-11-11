@@ -48,6 +48,8 @@ export async function enableImages(
     }),
     mutex
   );
+  // The workspace store is the palette's source whether or not climg starts.
+  endpoint.ui = store;
   try {
     const service = await ImagesService.create({
       config,
@@ -56,7 +58,6 @@ export async function enableImages(
       nodetplFile,
       ...(options.log ? { log: options.log } : {})
     });
-    endpoint.ui = store;
     endpoint.images = { service };
     messages.push(`Images: climg ${service.config.version} (contract ${service.config.contract}), images in ${service.config.imagesDirs[0]}, Node Templates in ${nodetplFile}.`);
   } catch (error) {

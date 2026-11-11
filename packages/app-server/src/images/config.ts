@@ -19,6 +19,8 @@ export interface ImagesConfig {
   /** Passed as CLIMG_STATE; else the state dir of the `climg` config. */
   statePath?: string;
   runAs?: ImagesRunAs;
+  /** Passed as HOME; wins over the home of the run-as user in `/etc/passwd`, which differs between host and container. */
+  home?: string;
   uploadMaxBytes: number;
   maxJobs: number;
   /** Extra environment for `climg` (tests); never taken from the server's own environment. */
@@ -37,6 +39,7 @@ export const IMAGES_CONFIG_KEYS = [
   "WEB_LOCAL_CLIMG_CONFIG",
   "WEB_LOCAL_CLIMG_STATE",
   "WEB_LOCAL_CLIMG_USER",
+  "WEB_LOCAL_CLIMG_HOME",
   "WEB_LOCAL_IMAGES_UPLOAD_MAX"
 ];
 
@@ -76,6 +79,11 @@ export function resolveImagesConfig(
     }
   }
 
+  const home = nonEmpty(env[`${prefix}CLIMG_HOME`]);
+  if (home !== undefined && !path.isAbsolute(home)) {
+    return { problems: [`${prefix}CLIMG_HOME must be an absolute path, got "${home}".`] };
+  }
+
   let runAs: ImagesRunAs | undefined;
   const user = nonEmpty(env[`${prefix}CLIMG_USER`]);
   if (user !== undefined) {
@@ -103,6 +111,7 @@ export function resolveImagesConfig(
       ...(configPath !== undefined ? { configPath } : {}),
       ...(statePath !== undefined ? { statePath } : {}),
       ...(runAs ? { runAs } : {}),
+      ...(home !== undefined ? { home } : {}),
       uploadMaxBytes,
       maxJobs: DEFAULT_MAX_JOBS
     },

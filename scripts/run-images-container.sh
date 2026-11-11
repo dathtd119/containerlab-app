@@ -16,6 +16,7 @@ WORKSPACE="${WORKSPACE:-$HOME/.clab-ct}"
 CLAB_BINARY="${CLAB_BINARY:-$(command -v containerlab)}"
 CLIMG_UID="${CLIMG_UID:-$(id -u)}"
 CLIMG_GID="${CLIMG_GID:-$(stat -c %g /var/run/docker.sock)}"
+CLIMG_HOME="${CLIMG_HOME:-$HOME}"                     # HOME of climg in the container; the host user's, not the image's passwd
 ALLOWED_HOSTS="${ALLOWED_HOSTS:-localhost,127.0.0.1,[::1]}"
 
 mkdir -p "$WORKSPACE/ui" "$CLIMG_STATE" "$IMAGES_DIR"
@@ -40,5 +41,6 @@ docker run -d --name "$NAME" \
   -e WEB_LOCAL_CLIMG_CONFIG="$CLIMG_CONFIG" \
   -e WEB_LOCAL_CLIMG_STATE="$CLIMG_STATE" \
   -e WEB_LOCAL_CLIMG_USER="$CLIMG_UID:$CLIMG_GID" \
+  -e WEB_LOCAL_CLIMG_HOME="$CLIMG_HOME" \
   -e WEB_ALLOWED_HOSTS="$ALLOWED_HOSTS" \
   "$IMAGE"

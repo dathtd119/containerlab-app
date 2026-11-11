@@ -321,3 +321,21 @@ test("a 1 GiB upload streams to disk without buffering it in memory", { timeout:
   assert.ok(externalGrowth < 200 * MIB, `external memory grew ${Math.round(externalGrowth / MIB)} MiB`);
   assert.deepEqual(await fs.readdir(context.imagesDir), ["big.qcow2"]);
 });
+
+test("a JSON body over the default limit is refused with 413 on the upload route", async (t) => {
+  const context = await createContext(t);
+  const response = await fetch(`${context.base}/api/runtime/images/upload`, {
+    method: "PUT",
+    headers: { ...context.headers, "content-type": "application/json", "x-file-name": "a.qcow2" },
+    body: JSON.stringify({ pad: "x".repeat(2 * MIB) })
+  });
+  assert.equal(response.status, 413);
+});
+
+test("an octet-stream upload above Fastify's default body limit still succeeds", async (t) => {
+  const context = await createContext(t);
+  const size = 3 * MIB;
+  const result = await putFile(context, "big.qcow2", Readable.from([Buffer.alloc(size, 1)]), size).done;
+  assert.equal(result.status, 201, JSON.stringify(result.json));
+  assert.equal((await fs.stat(path.join(context.imagesDir, "big.qcow2"))).size, size);
+});

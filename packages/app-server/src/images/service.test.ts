@@ -387,3 +387,49 @@ test("the fake climg path is the only executable run", async (t) => {
   const harness = await createHarness(t);
   assert.equal(harness.config.climgPath, FAKE_CLIMG);
 });
+
+test("the job cap holds for parallel starts and a failed start frees its slot", async (t) => {
+  const harness = await createHarness(t, { env: { FAKE_CLIMG_JOB_MS: "20000" }, config: { maxJobs: 4 } });
+  const results = await Promise.allSettled(
+    Array.from({ length: 10 }, (_, index) => harness.service.jobs.start({ op: "pull", ref: `labhub:p${index}` }))
+  );
+  const accepted = results.filter((result) => result.status === "fulfilled");
+  const refused = results.filter((result) => result.status === "rejected");
+  assert.equal(accepted.length, 4);
+  assert.equal(refused.length, 6);
+  for (const result of refused) {
+    const reason = (result as PromiseRejectedResult).reason;
+    assert.ok(reason instanceof ImagesError && reason.status === 429, String(reason));
+  }
+  for (const result of accepted) await harness.service.jobs.cancel((result as PromiseFulfilledResult<ImagesJob>).value.id);
+  await harness.service.jobs.idle(5000);
+
+  // A start that fails after the reservation gives the slot back.
+  await fs.rm(path.join(harness.stateDir, "jobs"), { recursive: true, force: true });
+  await fs.writeFile(path.join(harness.stateDir, "jobs"), "not a directory");
+  for (let index = 0; index < 6; index += 1) {
+    await assert.rejects(
+      harness.service.jobs.start({ op: "pull", ref: `labhub:f${index}` }),
+      (error: unknown) => !(error instanceof ImagesError && error.status === 429)
+    );
+  }
+  assert.equal(harness.service.jobs.activeCount, 0);
+});
+
+test("cancel after the child exited but while finish() runs sends no signal", async (t) => {
+  const harness = await createHarness(t, { env: { FAKE_CLIMG_JOB_MS: "50", FAKE_CLIMG_NODETPL_PAUSE_MS: "1500" } });
+  const started = await harness.service.jobs.start({ op: "pull", ref: "labhub:vios-1" });
+  // The template step of finish() has begun once climg was asked to add the template.
+  for (let i = 0; i < 200 && !(await harness.calls()).some((call) => call.argv[0] === "nodetpl" && call.argv.includes("add")); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok((await harness.calls()).some((call) => call.argv[0] === "nodetpl" && call.argv.includes("add")));
+  const kill = t.mock.method(process, "kill", () => true);
+  await assert.rejects(
+    harness.service.jobs.cancel(started.id),
+    (error: unknown) => error instanceof ImagesError && error.status === 409 && error.code === "finishing"
+  );
+  assert.equal(kill.mock.callCount(), 0);
+  kill.mock.restore();
+  assert.equal((await untilEnded(harness, started.id)).state, "succeeded");
+});

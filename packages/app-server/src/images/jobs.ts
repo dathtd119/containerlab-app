@@ -29,6 +29,8 @@ const ERR_TAIL = 2000;
 interface LiveJob {
   job: ImagesJob;
   pid: number | undefined;
+  /** The child has exited and been reaped: its pid may belong to another process now, so no signal is sent. */
+  reaped: boolean;
   exited: boolean;
   killTimer?: NodeJS.Timeout;
 }
@@ -57,6 +59,8 @@ export interface JobRegistryOptions {
 export class JobRegistry {
   private readonly live = new Map<string, LiveJob>();
   private readonly killAfterMs: number;
+  /** Slots taken by `start()` calls that passed the cap check but have not registered their job yet. */
+  private pending = 0;
 
   constructor(private readonly options: JobRegistryOptions) {
     this.killAfterMs = options.killAfterMs ?? KILL_AFTER_MS;
@@ -67,7 +71,7 @@ export class JobRegistry {
   }
 
   get activeCount(): number {
-    let count = 0;
+    let count = this.pending;
     for (const entry of this.live.values()) if (!entry.exited) count += 1;
     return count;
   }
@@ -151,7 +155,7 @@ export class JobRegistry {
     for (const stored of await this.readStored()) {
       jobs.push(OPEN_STATES.has(stored.state) ? this.markRestarted(stored) : stored);
     }
-    jobs.sort((left, right) => right.startedAt.localeCompare(left.startedAt));
+    jobs.sort((left, right) => (right.startedAt ?? "").localeCompare(left.startedAt ?? ""));
     const shown = jobs.slice(0, LISTED_JOBS);
     return { jobs: shown, active: shown.filter((job) => OPEN_STATES.has(job.state)).length };
   }
@@ -197,64 +201,81 @@ export class JobRegistry {
       throw new ImagesError(`At most ${this.options.config.maxJobs} jobs run at once`, 429, "too_many_jobs");
     }
 
-    const id = randomUUID();
-    const jobFile = this.path(id, ".json");
-    // Arguments are built (and validated) before anything is created or started.
-    const args = jobArgs({
-      op,
-      ...(body.ref !== undefined ? { ref: body.ref } : {}),
-      ...(filePath !== undefined ? { filePath } : {}),
-      ...(body.kind !== undefined ? { kind: body.kind } : {}),
-      ...(body.version !== undefined ? { version: body.version } : {}),
-      ...(body.tag !== undefined ? { tag: body.tag } : {}),
-      ...(body.force !== undefined ? { force: body.force } : {}),
-      jobFile
-    });
-
-    const { runAs } = this.options.config;
-    await mkdirForRunAs(runAs, this.options.jobsDir, DIR_MODE);
-    const chown = (target: string) => chownToRunAs(runAs, target);
-    const out = await openOutputFile(this.path(id, ".out"), chown);
-    let err;
-    try {
-      err = await openOutputFile(this.path(id, ".err"), chown);
-    } catch (error) {
-      await out.close();
-      throw error;
-    }
-
-    const now = new Date().toISOString();
-    const job: ImagesJob = {
-      id,
-      op,
-      ...(typeof body.ref === "string" ? { ref: body.ref } : {}),
-      ...(typeof body.file === "string" ? { file: body.file } : {}),
-      ...(typeof body.kind === "string" ? { kind: body.kind } : {}),
-      ...(typeof body.version === "string" ? { version: body.version } : {}),
-      ...(typeof body.tag === "string" ? { tag: body.tag } : {}),
-      ...(body.force === true ? { force: true } : {}),
-      state: "running",
-      phase: "",
-      pct: null,
-      message: "",
-      log: [],
-      startedAt: now,
-      updatedAt: now
+    // Reserved before the first await, so parallel starts cannot all pass the check above.
+    this.pending += 1;
+    let reserved = true;
+    const release = () => {
+      if (reserved) {
+        reserved = false;
+        this.pending -= 1;
+      }
     };
-    const spawned = spawnClimg(this.options.config, args, { stdout: out.fd, stderr: err.fd });
-    // The child holds its own copies of the descriptors.
-    await Promise.all([out.close(), err.close()]);
-    const live: LiveJob = { job, pid: spawned.child.pid, exited: false };
-    this.live.set(id, live);
-    await this.persist(job).catch((error: unknown) => this.options.log?.(`job ${id}: cannot write job file: ${String(error)}`));
-    void spawned.done.then((exit) => this.finish(live, exit));
-    return job;
+    try {
+      const id = randomUUID();
+      const jobFile = this.path(id, ".json");
+      // Arguments are built (and validated) before anything is created or started.
+      const args = jobArgs({
+        op,
+        ...(body.ref !== undefined ? { ref: body.ref } : {}),
+        ...(filePath !== undefined ? { filePath } : {}),
+        ...(body.kind !== undefined ? { kind: body.kind } : {}),
+        ...(body.version !== undefined ? { version: body.version } : {}),
+        ...(body.tag !== undefined ? { tag: body.tag } : {}),
+        ...(body.force !== undefined ? { force: body.force } : {}),
+        jobFile
+      });
+
+      const { runAs } = this.options.config;
+      await mkdirForRunAs(runAs, this.options.jobsDir, DIR_MODE);
+      const chown = (target: string) => chownToRunAs(runAs, target);
+      const out = await openOutputFile(this.path(id, ".out"), chown);
+      let err;
+      try {
+        err = await openOutputFile(this.path(id, ".err"), chown);
+      } catch (error) {
+        await out.close();
+        throw error;
+      }
+
+      const now = new Date().toISOString();
+      const job: ImagesJob = {
+        id,
+        op,
+        ...(typeof body.ref === "string" ? { ref: body.ref } : {}),
+        ...(typeof body.file === "string" ? { file: body.file } : {}),
+        ...(typeof body.kind === "string" ? { kind: body.kind } : {}),
+        ...(typeof body.version === "string" ? { version: body.version } : {}),
+        ...(typeof body.tag === "string" ? { tag: body.tag } : {}),
+        ...(body.force === true ? { force: true } : {}),
+        state: "running",
+        phase: "",
+        pct: null,
+        message: "",
+        log: [],
+        startedAt: now,
+        updatedAt: now
+      };
+      const spawned = spawnClimg(this.options.config, args, { stdout: out.fd, stderr: err.fd });
+      // The child holds its own copies of the descriptors.
+      await Promise.all([out.close(), err.close()]);
+      const live: LiveJob = { job, pid: spawned.child.pid, reaped: false, exited: false };
+      this.live.set(id, live);
+      release();
+      await this.persist(job).catch((error: unknown) => this.options.log?.(`job ${id}: cannot write job file: ${String(error)}`));
+      void spawned.done.then((exit) => this.finish(live, exit));
+      return job;
+    } finally {
+      release();
+    }
   }
 
   private async finish(
     live: LiveJob,
     exit: { code: number | null; signal: NodeJS.Signals | null; startError?: Error }
   ): Promise<void> {
+    // First, before any await: the child is reaped, so Cancel and the SIGKILL timer must not signal its pid.
+    live.reaped = true;
+    live.pid = undefined;
     const { redactor } = this.options;
     if (live.killTimer) clearTimeout(live.killTimer);
     const id = live.job.id;
@@ -313,7 +334,6 @@ export class JobRegistry {
     const now = new Date().toISOString();
     live.job = { ...ended, finishedAt: now, updatedAt: now };
     live.exited = true;
-    live.pid = undefined;
     await this.persist(live.job).catch((error: unknown) => this.options.log?.(`job ${id}: cannot write job file: ${String(error)}`));
   }
 
@@ -359,7 +379,10 @@ export class JobRegistry {
       if (!known) throw new ImagesError("Job not found", 404, "not_found");
       throw new ImagesError("This job was not started by this server instance and cannot be cancelled", 409, "not_ours");
     }
-    if (live.exited || live.pid === undefined) throw new ImagesError("Job has already ended", 409, "ended");
+    if (live.exited) throw new ImagesError("Job has already ended", 409, "ended");
+    if (live.reaped || live.pid === undefined) {
+      throw new ImagesError("Job has already exited and is finishing up; nothing to cancel", 409, "finishing");
+    }
     if (live.job.cancelRequested !== true) {
       live.job = { ...live.job, cancelRequested: true };
       const { pid } = live;
@@ -369,7 +392,7 @@ export class JobRegistry {
         // Gone already; the exit handler settles the job.
       }
       live.killTimer = setTimeout(() => {
-        if (!live.exited) signalGroup(pid, "SIGKILL");
+        if (!live.reaped) signalGroup(pid, "SIGKILL");
       }, this.killAfterMs);
       live.killTimer.unref();
     }
