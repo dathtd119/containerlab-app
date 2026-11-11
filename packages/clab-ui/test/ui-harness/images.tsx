@@ -96,7 +96,7 @@ function doctorChecks(): ImagesDoctorCheck[] {
     { check: "docker", status: "ok", detail: "29.0.1" },
     kvm,
     { check: "containerlab", status: "ok", detail: "0.70.2" },
-    { check: "vrnetlab", status: "ok", detail: "/home/bds/containerlab/vrnetlab @ 4f2a1c" },
+    { check: "vrnetlab", status: "ok", detail: "/home/user/containerlab/vrnetlab @ 4f2a1c" },
     { check: "disk", status: "ok", detail: "412.0 GB free, floor 20.0 GB" },
     { check: "mirror main", status: "ok", detail: "Range probe HTTP 206 in 120 ms" }
   ];
@@ -109,7 +109,7 @@ function fakeStatus(): ImagesStatus {
     climgVersion: "0.4.0",
     config: {
       imagesDirs: ["/srv/images"],
-      stateDir: "/home/bds/.local/state/climg",
+      stateDir: "/home/user/.local/state/climg",
       diskFloorBytes: 20e9,
       maxBuilds: 2,
       mirrors: ["main", "eu"],

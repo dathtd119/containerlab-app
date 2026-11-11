@@ -4,12 +4,12 @@
 # packages `climg` needs. The upstream Dockerfile stays untouched; this file
 # layers on its final stage.
 #
-#   docker build -t containerlab-app-plus:base .
-#   docker build -f Dockerfile.images -t containerlab-app-plus:images-dev .
+#   docker build -t containerlab-web:base .
+#   docker build -f Dockerfile.images -t containerlab-web:images-dev .
 #
 # Start it with scripts/run-images-container.sh. climg itself, vrnetlab, its
 # config and state are bind-mounted from the host, not baked in.
-ARG BASE=containerlab-app-plus:base
+ARG BASE=containerlab-web:base
 FROM ${BASE}
 
 # GNU bash sed grep coreutils: vrnetlab Makefiles use `sed -r` and GNU regex,

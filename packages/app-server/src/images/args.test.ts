@@ -95,9 +95,9 @@ test("configuration: byte sizes, run-as user and the disabled state", () => {
 
 test("WEB_LOCAL_CLIMG_HOME is parsed, and a relative path is refused", () => {
   const base = { WEB_LOCAL_CLIMG_PATH: "/opt/climg", WEB_LOCAL_CLIMG_USER: "1000:1000" };
-  assert.equal(resolveImagesConfig({ ...base, WEB_LOCAL_CLIMG_HOME: "/home/bds" }, "WEB_LOCAL_", 0).config?.home, "/home/bds");
+  assert.equal(resolveImagesConfig({ ...base, WEB_LOCAL_CLIMG_HOME: "/home/climg" }, "WEB_LOCAL_", 0).config?.home, "/home/climg");
   assert.equal(resolveImagesConfig(base, "WEB_LOCAL_", 0).config?.home, undefined);
-  const refused = resolveImagesConfig({ ...base, WEB_LOCAL_CLIMG_HOME: "home/bds" }, "WEB_LOCAL_", 0);
+  const refused = resolveImagesConfig({ ...base, WEB_LOCAL_CLIMG_HOME: "home/climg" }, "WEB_LOCAL_", 0);
   assert.equal(refused.config, undefined);
   assert.match(refused.problems[0], /WEB_LOCAL_CLIMG_HOME must be an absolute path/);
 });

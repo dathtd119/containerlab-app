@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { test, expect, type Locator, type Page } from "@playwright/test";
@@ -9,16 +8,24 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 // (WEB_LOCAL_LABS=true, WEB_LOCAL_CLIMG_*), e.g.
 //   IMAGES_LIVE_URL=https://localhost:3001 npx playwright test -c <config with testDir=specs> images-live.spec.ts
 // IMAGES_LIVE_FULL=1 also runs the real pull and the real upload+build (minutes, needs docker/kvm).
-// Env: IMAGES_LIVE_IMAGES_DIR (climg images dir), IMAGES_LIVE_NODES_FILE (custom-nodes.json),
-//      IMAGES_LIVE_WORKSPACE (WEB_LOCAL_WORKSPACE), IMAGES_LIVE_UPLOAD_SOURCE (a real image file for the build test).
+// Env (required when IMAGES_LIVE_URL is set): IMAGES_LIVE_IMAGES_DIR (the server's climg images dir),
+//      IMAGES_LIVE_WORKSPACE (the server's WEB_LOCAL_WORKSPACE).
+// Optional: IMAGES_LIVE_NODES_FILE (default <workspace>/ui/custom-nodes.json), IMAGES_LIVE_CLIMG (default `climg` on PATH;
+//      run with the server's CLIMG_CONFIG/CLIMG_STATE), IMAGES_LIVE_UPLOAD_SOURCE (a real image file for the build test).
 const LIVE_URL = process.env.IMAGES_LIVE_URL ?? "";
 const FULL = (process.env.IMAGES_LIVE_FULL ?? "") !== "";
-const HOME = os.homedir();
-const IMAGES_DIR = process.env.IMAGES_LIVE_IMAGES_DIR ?? path.join(HOME, ".local/share/climg-dev/images");
-const NODES_FILE = process.env.IMAGES_LIVE_NODES_FILE ?? path.join(HOME, ".clab-dev/ui/custom-nodes.json");
-const WORKSPACE = process.env.IMAGES_LIVE_WORKSPACE ?? path.join(HOME, ".clab-dev");
+
+function requiredEnv(name: string): string {
+  const value = process.env[name] ?? "";
+  if (value === "" && LIVE_URL !== "") throw new Error(`${name} must be set when IMAGES_LIVE_URL is set`);
+  return value;
+}
+
+const IMAGES_DIR = requiredEnv("IMAGES_LIVE_IMAGES_DIR");
+const WORKSPACE = requiredEnv("IMAGES_LIVE_WORKSPACE");
+const NODES_FILE = process.env.IMAGES_LIVE_NODES_FILE ?? path.join(WORKSPACE, "ui/custom-nodes.json");
 const UPLOAD_SOURCE = process.env.IMAGES_LIVE_UPLOAD_SOURCE ?? "";
-const CLIMG = process.env.IMAGES_LIVE_CLIMG ?? "/home/datht/code/climg/bin/climg"; // run with the server's CLIMG_CONFIG/CLIMG_STATE
+const CLIMG = process.env.IMAGES_LIVE_CLIMG ?? "climg";
 const SHOTS = process.env.IMAGES_LIVE_SHOTS ?? "";
 
 test.skip(LIVE_URL === "", "set IMAGES_LIVE_URL to a running web app started with WEB_LOCAL_LABS=true and climg configured");

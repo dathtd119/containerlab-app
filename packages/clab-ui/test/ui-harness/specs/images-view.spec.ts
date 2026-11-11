@@ -279,10 +279,10 @@ test.describe("Images view", () => {
   });
 });
 
-const EVIDENCE_DIR = "/home/datht/claude/BDS-Internal-System/openspec/changes/clab-app-images-explorer/evidence/ui/";
+const EVIDENCE_DIR = process.env.IMAGES_SCREENSHOTS_DIR ?? "";
 
 test("screenshots", async ({ page }) => {
-  test.skip((process.env.IMAGES_SCREENSHOTS ?? "") === "", "set IMAGES_SCREENSHOTS=1 to write the evidence PNGs");
+  test.skip(EVIDENCE_DIR === "", "set IMAGES_SCREENSHOTS_DIR to a directory to write the evidence PNGs");
   test.setTimeout(240000);
   fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
   await page.setViewportSize({ width: 1440, height: 900 });

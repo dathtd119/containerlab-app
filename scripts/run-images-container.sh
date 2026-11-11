@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # Starts the images-capable web image (Dockerfile.images) in local-labs mode.
 # Every path is mounted at the same location inside and outside the container.
-# Settings come from the environment; the defaults suit the dev host.
+# Settings come from the environment. CLIMG_PATH (a climg checkout) and VRNETLAB
+# have no default and must be set.
 set -euo pipefail
 
-NAME="${NAME:-clab-app-images-ct}"
-IMAGE="${IMAGE:-containerlab-app-plus:images-dev}"
-PORT="${PORT:-3101}"
-CLIMG_PATH="${CLIMG_PATH:-$HOME/code/climg}"          # mounted read-only
-VRNETLAB="${VRNETLAB:-$HOME/code/vrnetlab}"
-CLIMG_CONFIG="${CLIMG_CONFIG:-$HOME/.config/climg-ct/config.yaml}"
-CLIMG_STATE="${CLIMG_STATE:-$HOME/.local/share/climg-ct}"
+NAME="${NAME:-containerlab-app-images}"
+IMAGE="${IMAGE:-containerlab-web:images-dev}"
+PORT="${PORT:-3001}"
+CLIMG_PATH="${CLIMG_PATH:?set CLIMG_PATH to a climg checkout (contains bin/climg)}"   # mounted read-only
+VRNETLAB="${VRNETLAB:?set VRNETLAB to your vrnetlab checkout}"
+CLIMG_CONFIG="${CLIMG_CONFIG:-$HOME/.config/climg/config.yaml}"
+CLIMG_STATE="${CLIMG_STATE:-$HOME/.local/share/climg}"
 IMAGES_DIR="${IMAGES_DIR:-$CLIMG_STATE/images}"
-WORKSPACE="${WORKSPACE:-$HOME/.clab-ct}"
+WORKSPACE="${WORKSPACE:-$HOME/.clab}"
 CLAB_BINARY="${CLAB_BINARY:-$(command -v containerlab)}"
 CLIMG_UID="${CLIMG_UID:-$(id -u)}"
 CLIMG_GID="${CLIMG_GID:-$(stat -c %g /var/run/docker.sock)}"
