@@ -2,6 +2,8 @@ import path from "node:path";
 
 const DEFAULT_UPLOAD_MAX_BYTES = 20 * 1024 ** 3;
 const DEFAULT_MAX_JOBS = 4;
+const DEFAULT_MAX_RUNNING = 1;
+const DEFAULT_MAX_QUEUED = 20;
 /** Image file extensions `climg scan` recognises; an upload must end in one. */
 export const IMAGE_EXTENSIONS = [".qcow2", ".vmdk", ".tgz", ".tar.gz", ".bin", ".iol"] as const;
 
@@ -22,7 +24,12 @@ export interface ImagesConfig {
   /** Passed as HOME; wins over the home of the run-as user in `/etc/passwd`, which differs between host and container. */
   home?: string;
   uploadMaxBytes: number;
+  /** Hard cap on jobs running at once, whatever `maxRunning` says. */
   maxJobs: number;
+  /** Pull/build jobs that run at once (`WEB_LOCAL_IMAGES_MAX_RUNNING`); the others wait in the server queue. */
+  maxRunning: number;
+  /** Jobs that may wait in the queue (`WEB_LOCAL_IMAGES_MAX_QUEUED`); a start beyond it is refused with 429. */
+  maxQueued: number;
   /** Extra environment for `climg` (tests); never taken from the server's own environment. */
   extraEnv?: Record<string, string>;
 }
@@ -40,7 +47,9 @@ export const IMAGES_CONFIG_KEYS = [
   "WEB_LOCAL_CLIMG_STATE",
   "WEB_LOCAL_CLIMG_USER",
   "WEB_LOCAL_CLIMG_HOME",
-  "WEB_LOCAL_IMAGES_UPLOAD_MAX"
+  "WEB_LOCAL_IMAGES_UPLOAD_MAX",
+  "WEB_LOCAL_IMAGES_MAX_RUNNING",
+  "WEB_LOCAL_IMAGES_MAX_QUEUED"
 ];
 
 const SIZE_UNITS: Record<string, number> = { "": 1, k: 1024, m: 1024 ** 2, g: 1024 ** 3, t: 1024 ** 4 };
@@ -53,12 +62,19 @@ export function parseByteSize(value: string): number | undefined {
   return Number.isSafeInteger(bytes) && bytes > 0 ? bytes : undefined;
 }
 
+/** A whole number of at least `min`; undefined when the text is anything else. */
+function parseCount(value: string, min: number): number | undefined {
+  if (!/^\d{1,6}$/.test(value.trim())) return undefined;
+  const count = Number(value);
+  return count >= min ? count : undefined;
+}
+
 function nonEmpty(value: string | undefined): string | undefined {
   const trimmed = value?.trim() ?? "";
   return trimmed === "" ? undefined : trimmed;
 }
 
-/** `WEB_LOCAL_CLIMG_*` and `WEB_LOCAL_IMAGES_UPLOAD_MAX` of one environment. */
+/** `WEB_LOCAL_CLIMG_*` and `WEB_LOCAL_IMAGES_*` of one environment. */
 export function resolveImagesConfig(
   env: NodeJS.ProcessEnv,
   prefix = "WEB_LOCAL_",
@@ -105,6 +121,18 @@ export function resolveImagesConfig(
     else uploadMaxBytes = parsed;
   }
 
+  const counts = { maxRunning: DEFAULT_MAX_RUNNING, maxQueued: DEFAULT_MAX_QUEUED };
+  for (const [key, field, min, fallback] of [
+    ["IMAGES_MAX_RUNNING", "maxRunning", 1, DEFAULT_MAX_RUNNING],
+    ["IMAGES_MAX_QUEUED", "maxQueued", 0, DEFAULT_MAX_QUEUED]
+  ] as const) {
+    const text = nonEmpty(env[`${prefix}${key}`]);
+    if (text === undefined) continue;
+    const parsed = parseCount(text, min);
+    if (parsed === undefined) problems.push(`${prefix}${key} "${text}" is not a whole number of at least ${min}; using ${fallback}.`);
+    else counts[field] = parsed;
+  }
+
   return {
     config: {
       climgPath,
@@ -113,7 +141,8 @@ export function resolveImagesConfig(
       ...(runAs ? { runAs } : {}),
       ...(home !== undefined ? { home } : {}),
       uploadMaxBytes,
-      maxJobs: DEFAULT_MAX_JOBS
+      maxJobs: DEFAULT_MAX_JOBS,
+      ...counts
     },
     problems
   };

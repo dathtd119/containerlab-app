@@ -95,23 +95,39 @@ export function parseDoctor(value: unknown): ImagesDoctorCheck[] {
   }));
 }
 
+/** `vendors` of `climg index --json`; entries that do not fit are dropped, absent for an older `climg`. */
+function vendorCounts(value: unknown): ImagesIndexInfo["vendors"] {
+  if (!Array.isArray(value)) return undefined;
+  return value.flatMap((row) =>
+    isObject(row) && typeof row.vendor === "string" && typeof row.entries === "number" && typeof row.buildable === "number"
+      ? [{ vendor: row.vendor, entries: row.entries, buildable: row.buildable }]
+      : []
+  );
+}
+
 export function parseIndex(value: unknown): ImagesIndexInfo {
-  return object(value, "index") as ImagesIndexInfo;
+  const { vendors, ...rest } = object(value, "index");
+  const parsed = vendorCounts(vendors);
+  return { ...rest, ...(parsed ? { vendors: parsed } : {}) } as ImagesIndexInfo;
+}
+
+/** The optional `vendor`, `folder` and `model` strings of a record: kept when text or null, dropped otherwise. */
+function recordOf(row: Obj): ImageRecord {
+  string(row.key, "record.key");
+  string(row.status, "record.status");
+  const record: Obj = { ...row };
+  for (const field of ["vendor", "folder", "model"]) {
+    if (field in record && record[field] !== null && typeof record[field] !== "string") delete record[field];
+  }
+  return record as ImageRecord;
 }
 
 export function parseRecords(value: unknown): ImageRecord[] {
-  return arrayOfObjects(value, "records").map((row) => {
-    string(row.key, "record.key");
-    string(row.status, "record.status");
-    return row as ImageRecord;
-  });
+  return arrayOfObjects(value, "records").map(recordOf);
 }
 
 export function parseRecord(value: unknown): ImageRecord {
-  const row = object(value, "record");
-  string(row.key, "record.key");
-  string(row.status, "record.status");
-  return row as ImageRecord;
+  return recordOf(object(value, "record"));
 }
 
 export function parseBuiltImages(value: unknown): BuiltImage[] {

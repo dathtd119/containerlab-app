@@ -32,6 +32,10 @@ interface LiveJob {
   /** The child has exited and been reaped: its pid may belong to another process now, so no signal is sent. */
   reaped: boolean;
   exited: boolean;
+  /** Waiting in the server queue (or being started out of it): no process yet. */
+  queued: boolean;
+  /** The `climg` command line, kept while the job waits for a slot. */
+  args?: string[];
   killTimer?: NodeJS.Timeout;
 }
 
@@ -59,6 +63,8 @@ export interface JobRegistryOptions {
 export class JobRegistry {
   private readonly live = new Map<string, LiveJob>();
   private readonly killAfterMs: number;
+  /** Jobs waiting for a slot, first come first served. */
+  private readonly queue: LiveJob[] = [];
   /** Slots taken by `start()` calls that passed the cap check but have not registered their job yet. */
   private pending = 0;
 
@@ -68,6 +74,19 @@ export class JobRegistry {
 
   private path(id: string, extension: string): string {
     return path.join(this.options.jobsDir, `${id}${extension}`);
+  }
+
+  /** Jobs that may run at once: `WEB_LOCAL_IMAGES_MAX_RUNNING`, never above the hard cap. */
+  get slots(): number {
+    const { maxRunning, maxJobs } = this.options.config;
+    return Math.max(1, Math.min(maxRunning, maxJobs));
+  }
+
+  /** Jobs that hold a slot: started but not finished, or reserved by a start in progress. */
+  private get running(): number {
+    let count = this.pending;
+    for (const entry of this.live.values()) if (!entry.exited && !entry.queued) count += 1;
+    return count;
   }
 
   get activeCount(): number {
@@ -131,6 +150,10 @@ export class JobRegistry {
   private async refresh(live: LiveJob): Promise<ImagesJob> {
     const { job } = live;
     if (live.exited) return job;
+    if (live.queued) {
+      const position = this.queue.indexOf(live) + 1;
+      return position > 0 ? { ...job, queuePosition: position } : job;
+    }
     let doc;
     try {
       doc = parseJobDoc(JSON.parse(await fsp.readFile(this.path(job.id, ".json"), "utf8")));
@@ -155,7 +178,17 @@ export class JobRegistry {
     for (const stored of await this.readStored()) {
       jobs.push(OPEN_STATES.has(stored.state) ? this.markRestarted(stored) : stored);
     }
-    jobs.sort((left, right) => (right.startedAt ?? "").localeCompare(left.startedAt ?? ""));
+    // Running first, then the queue in order, then finished jobs newest first.
+    const rank = (job: ImagesJob) => {
+      if (job.queuePosition !== undefined) return 1;
+      return OPEN_STATES.has(job.state) ? 0 : 2;
+    };
+    jobs.sort((left, right) => {
+      const byRank = rank(left) - rank(right);
+      if (byRank !== 0) return byRank;
+      if (rank(left) === 1) return (left.queuePosition ?? 0) - (right.queuePosition ?? 0);
+      return (right.startedAt ?? "").localeCompare(left.startedAt ?? "");
+    });
     const shown = jobs.slice(0, LISTED_JOBS);
     return { jobs: shown, active: shown.filter((job) => OPEN_STATES.has(job.state)).length };
   }
@@ -197,13 +230,17 @@ export class JobRegistry {
     if (body.ref !== undefined) validateRef(body.ref);
     const filePath = body.file !== undefined ? await this.imageFile(body.file) : undefined;
 
-    if (this.activeCount >= this.options.config.maxJobs) {
-      throw new ImagesError(`At most ${this.options.config.maxJobs} jobs run at once`, 429, "too_many_jobs");
+    // Decided and reserved before the first await, so parallel starts cannot all pass the checks.
+    const startNow = this.queue.length === 0 && this.running < this.slots;
+    if (!startNow && this.queue.length >= this.options.config.maxQueued) {
+      throw new ImagesError(
+        `At most ${this.slots} jobs run at once and ${this.options.config.maxQueued} may wait`,
+        429,
+        "too_many_jobs"
+      );
     }
-
-    // Reserved before the first await, so parallel starts cannot all pass the check above.
-    this.pending += 1;
-    let reserved = true;
+    if (startNow) this.pending += 1;
+    let reserved = startNow;
     const release = () => {
       if (reserved) {
         reserved = false;
@@ -212,7 +249,6 @@ export class JobRegistry {
     };
     try {
       const id = randomUUID();
-      const jobFile = this.path(id, ".json");
       // Arguments are built (and validated) before anything is created or started.
       const args = jobArgs({
         op,
@@ -222,20 +258,8 @@ export class JobRegistry {
         ...(body.version !== undefined ? { version: body.version } : {}),
         ...(body.tag !== undefined ? { tag: body.tag } : {}),
         ...(body.force !== undefined ? { force: body.force } : {}),
-        jobFile
+        jobFile: this.path(id, ".json")
       });
-
-      const { runAs } = this.options.config;
-      await mkdirForRunAs(runAs, this.options.jobsDir, DIR_MODE);
-      const chown = (target: string) => chownToRunAs(runAs, target);
-      const out = await openOutputFile(this.path(id, ".out"), chown);
-      let err;
-      try {
-        err = await openOutputFile(this.path(id, ".err"), chown);
-      } catch (error) {
-        await out.close();
-        throw error;
-      }
 
       const now = new Date().toISOString();
       const job: ImagesJob = {
@@ -247,26 +271,92 @@ export class JobRegistry {
         ...(typeof body.version === "string" ? { version: body.version } : {}),
         ...(typeof body.tag === "string" ? { tag: body.tag } : {}),
         ...(body.force === true ? { force: true } : {}),
-        state: "running",
+        state: startNow ? "running" : "queued",
         phase: "",
         pct: null,
-        message: "",
+        message: startNow ? "" : "queued",
         log: [],
         startedAt: now,
         updatedAt: now
       };
-      const spawned = spawnClimg(this.options.config, args, { stdout: out.fd, stderr: err.fd });
-      // The child holds its own copies of the descriptors.
-      await Promise.all([out.close(), err.close()]);
-      const live: LiveJob = { job, pid: spawned.child.pid, reaped: false, exited: false };
+      const live: LiveJob = { job, pid: undefined, reaped: false, exited: false, queued: !startNow, args };
+      if (startNow) {
+        await this.launch(live, release);
+        return live.job;
+      }
       this.live.set(id, live);
-      release();
+      this.queue.push(live);
       await this.persist(job).catch((error: unknown) => this.options.log?.(`job ${id}: cannot write job file: ${String(error)}`));
-      void spawned.done.then((exit) => this.finish(live, exit));
-      return job;
+      const position = this.queue.indexOf(live) + 1;
+      return position > 0 ? { ...job, queuePosition: position } : live.job;
     } finally {
       release();
     }
+  }
+
+  /**
+   * Creates the output files and spawns `climg` for a job that holds a slot (reserved through `pending`).
+   * `release` gives the reservation back once the job counts as live, so it is never counted twice.
+   */
+  private async launch(live: LiveJob, release: () => void): Promise<void> {
+    const { job } = live;
+    const id = job.id;
+    const args = live.args ?? [];
+    const { runAs } = this.options.config;
+    await mkdirForRunAs(runAs, this.options.jobsDir, DIR_MODE);
+    const chown = (target: string) => chownToRunAs(runAs, target);
+    const out = await openOutputFile(this.path(id, ".out"), chown);
+    let err;
+    try {
+      err = await openOutputFile(this.path(id, ".err"), chown);
+    } catch (error) {
+      await out.close();
+      throw error;
+    }
+    const spawned = spawnClimg(this.options.config, args, { stdout: out.fd, stderr: err.fd });
+    // The child holds its own copies of the descriptors.
+    await Promise.all([out.close(), err.close()]);
+    const now = new Date().toISOString();
+    live.job = { ...job, state: "running", message: "", startedAt: now, updatedAt: now };
+    live.pid = spawned.child.pid;
+    live.queued = false;
+    live.args = undefined;
+    this.live.set(id, live);
+    release();
+    await this.persist(live.job).catch((error: unknown) => this.options.log?.(`job ${id}: cannot write job file: ${String(error)}`));
+    void spawned.done.then((exit) => this.finish(live, exit));
+  }
+
+  /** Starts waiting jobs while slots are free; a job that cannot start is failed and the next one is tried. */
+  private pump(): void {
+    while (this.queue.length > 0 && this.running < this.slots) {
+      const live = this.queue.shift() as LiveJob;
+      this.pending += 1;
+      let reserved = true;
+      const release = () => {
+        if (reserved) {
+          reserved = false;
+          this.pending -= 1;
+        }
+      };
+      void this.launch(live, release)
+        .catch((error: unknown) => this.failQueued(live, error))
+        .finally(() => {
+          release();
+          this.pump();
+        });
+    }
+  }
+
+  private async failQueued(live: LiveJob, error: unknown): Promise<void> {
+    const message = this.options.redactor.text(error instanceof Error ? error.message : String(error));
+    const now = new Date().toISOString();
+    live.queued = false;
+    live.args = undefined;
+    live.job = { ...live.job, state: "failed", error: message, message, finishedAt: now, updatedAt: now };
+    live.exited = true;
+    live.reaped = true;
+    await this.persist(live.job).catch(() => undefined);
   }
 
   private async finish(
@@ -334,6 +424,8 @@ export class JobRegistry {
     const now = new Date().toISOString();
     live.job = { ...ended, finishedAt: now, updatedAt: now };
     live.exited = true;
+    // The slot is free as soon as the job has ended, before its file is written.
+    this.pump();
     await this.persist(live.job).catch((error: unknown) => this.options.log?.(`job ${id}: cannot write job file: ${String(error)}`));
   }
 
@@ -380,6 +472,7 @@ export class JobRegistry {
       throw new ImagesError("This job was not started by this server instance and cannot be cancelled", 409, "not_ours");
     }
     if (live.exited) throw new ImagesError("Job has already ended", 409, "ended");
+    if (live.queued) return this.cancelQueued(live);
     if (live.reaped || live.pid === undefined) {
       throw new ImagesError("Job has already exited and is finishing up; nothing to cancel", 409, "finishing");
     }
@@ -397,6 +490,22 @@ export class JobRegistry {
       live.killTimer.unref();
     }
     return this.refresh(live);
+  }
+
+  /** A job still in the queue ends `cancelled` without a process ever being spawned. */
+  private async cancelQueued(live: LiveJob): Promise<ImagesJob> {
+    const at = this.queue.indexOf(live);
+    // Not in the queue any more: it is being started, and the next cancel finds a process.
+    if (at < 0) throw new ImagesError("Job is starting; try again in a moment", 409, "finishing");
+    this.queue.splice(at, 1);
+    const now = new Date().toISOString();
+    live.queued = false;
+    live.args = undefined;
+    live.reaped = true;
+    live.exited = true;
+    live.job = { ...live.job, state: "cancelled", message: "cancelled", cancelRequested: true, finishedAt: now, updatedAt: now };
+    await this.persist(live.job).catch((error: unknown) => this.options.log?.(`job ${live.job.id}: cannot write job file: ${String(error)}`));
+    return live.job;
   }
 
   /** Waits for every job of this instance to end (tests and shutdown). */

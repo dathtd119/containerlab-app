@@ -132,6 +132,9 @@ test("read routes, templates and jobs over HTTP", async (t) => {
   assert.equal((await call(context, "GET", "/api/runtime/images/show?ref=--force")).status, 400);
   assert.equal((await call(context, "GET", `/api/runtime/images/show?ref=${encodeURIComponent("vios; rm -rf /")}`)).status, 400);
   assert.equal((await call(context, "GET", "/api/runtime/images/search?q=--all")).status, 400);
+  const all = await call(context, "GET", "/api/runtime/images/search?all=true&vendor=H3C");
+  assert.equal(all.status, 200);
+  assert.deepEqual((all.json as Array<{ status: string }>).map((record) => record.status), ["unbuildable", "unbuildable"]);
   assert.equal((await call(context, "GET", "/api/runtime/images/show?ref=labhub:nope")).status, 404);
   assert.equal((await call(context, "GET", "/api/runtime/images/images")).status, 200);
   assert.deepEqual((await call(context, "GET", "/api/runtime/images/scan")).json, []);
@@ -270,7 +273,7 @@ test("the disk floor counts the uploads already running", async (t) => {
   const context = await createContext(t, { env: {} });
   const { UploadManager } = await import("./upload.ts");
   const manager = new UploadManager({
-    config: { climgPath: FAKE_CLIMG, uploadMaxBytes: 10_000, maxJobs: 4 },
+    config: { climgPath: FAKE_CLIMG, uploadMaxBytes: 10_000, maxJobs: 4, maxRunning: 4, maxQueued: 0 },
     imagesDir: context.imagesDir,
     diskFloorBytes: 1000,
     freeBytes: async () => 5000

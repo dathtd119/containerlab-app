@@ -51,6 +51,8 @@ export async function createHarness(
     statePath: stateDir,
     uploadMaxBytes: 20 * 1024 ** 3,
     maxJobs: 4,
+    maxRunning: 4,
+    maxQueued: 0,
     extraEnv: {
       FAKE_CLIMG_LOG: callLog,
       FAKE_IMAGES_DIR: imagesDir,

@@ -170,7 +170,9 @@ export class ImagesService {
       doctor: await this.doctor(),
       uploadMaxBytes: this.options.config.uploadMaxBytes,
       uploadExtensions: [...IMAGE_EXTENSIONS],
-      maxJobs: this.options.config.maxJobs
+      maxJobs: this.options.config.maxJobs,
+      maxRunning: this.jobs.slots,
+      maxQueued: this.options.config.maxQueued
     };
   }
 

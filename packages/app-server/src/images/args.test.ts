@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { RequestError } from "../runtimeProxy.ts";
 import { commandLine, jobArgs, nodetplArgs, searchArgs, showArgs } from "./args.ts";
-import { parseByteSize, resolveImagesConfig } from "./config.ts";
+import { IMAGES_CONFIG_KEYS, parseByteSize, resolveImagesConfig } from "./config.ts";
 import { climgEnvironment } from "./runner.ts";
 import { validateImageFileName, validateRef, validateTag } from "./validate.ts";
 
@@ -83,6 +83,8 @@ test("configuration: byte sizes, run-as user and the disabled state", () => {
   assert.deepEqual(ok.config?.runAs, { uid: 1000, gid: 999 });
   assert.equal(ok.config?.uploadMaxBytes, 1024 ** 3);
   assert.equal(ok.config?.maxJobs, 4);
+  assert.equal(ok.config?.maxRunning, 1);
+  assert.equal(ok.config?.maxQueued, 20);
   assert.equal(resolveImagesConfig({ WEB_LOCAL_CLIMG_PATH: "/opt/climg" }, "WEB_LOCAL_", 1000).config?.runAs, undefined);
   assert.equal(resolveImagesConfig({ WEB_LOCAL_CLIMG_PATH: "/opt/climg" }, "WEB_LOCAL_", 0).config, undefined, "root needs a run-as user");
   assert.equal(resolveImagesConfig({ WEB_LOCAL_CLIMG_PATH: "/opt/climg", WEB_LOCAL_CLIMG_USER: "0:0" }, "WEB_LOCAL_", 0).config, undefined);
@@ -101,8 +103,28 @@ test("WEB_LOCAL_CLIMG_HOME is parsed, and a relative path is refused", () => {
 });
 
 test("the configured HOME wins over the passwd home of the run-as user", () => {
-  const config = { climgPath: "/opt/climg", runAs: { uid: process.getuid?.() ?? 1000, gid: 1000 }, uploadMaxBytes: 1, maxJobs: 1 };
+  const config = { climgPath: "/opt/climg", runAs: { uid: process.getuid?.() ?? 1000, gid: 1000 }, uploadMaxBytes: 1, maxJobs: 1, maxRunning: 1, maxQueued: 0 };
   const fromPasswd = climgEnvironment(config, { PATH: "/bin", HOME: "/server/home" }).HOME;
   assert.notEqual(fromPasswd, "/home/configured");
   assert.equal(climgEnvironment({ ...config, home: "/home/configured" }, { PATH: "/bin", HOME: "/server/home" }).HOME, "/home/configured");
+});
+
+test("WEB_LOCAL_IMAGES_MAX_RUNNING and _MAX_QUEUED are parsed, and a bad value keeps the default with a problem", () => {
+  const base = { WEB_LOCAL_CLIMG_PATH: "/opt/climg", WEB_LOCAL_CLIMG_USER: "1000:1000" };
+  const set = resolveImagesConfig({ ...base, WEB_LOCAL_IMAGES_MAX_RUNNING: "2", WEB_LOCAL_IMAGES_MAX_QUEUED: "0" }, "WEB_LOCAL_", 0);
+  assert.equal(set.config?.maxRunning, 2);
+  assert.equal(set.config?.maxQueued, 0);
+  assert.deepEqual(set.problems, []);
+  const bad = resolveImagesConfig({ ...base, WEB_LOCAL_IMAGES_MAX_RUNNING: "0", WEB_LOCAL_IMAGES_MAX_QUEUED: "many" }, "WEB_LOCAL_", 0);
+  assert.equal(bad.config?.maxRunning, 1);
+  assert.equal(bad.config?.maxQueued, 20);
+  assert.equal(bad.problems.length, 2);
+  assert.ok(IMAGES_CONFIG_KEYS.includes("WEB_LOCAL_IMAGES_MAX_RUNNING") && IMAGES_CONFIG_KEYS.includes("WEB_LOCAL_IMAGES_MAX_QUEUED"));
+});
+
+test("search passes --all and --vendor through, before the keywords", () => {
+  assert.deepEqual(searchArgs({ q: "h3c vsr", vendor: "H3C", all: true }), ["search", "--json", "--vendor", "H3C", "--all", "--", "h3c", "vsr"]);
+  assert.deepEqual(searchArgs({ vendor: "Palo Alto" }), ["search", "--json", "--vendor", "Palo Alto"]);
+  assert.throws(() => searchArgs({ vendor: "-x" }), RequestError);
+  assert.ok(!searchArgs({ q: "vios" }).includes("--all"));
 });

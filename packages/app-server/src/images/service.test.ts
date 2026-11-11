@@ -433,3 +433,149 @@ test("cancel after the child exited but while finish() runs sends no signal", as
   kill.mock.restore();
   assert.equal((await untilEnded(harness, started.id)).state, "succeeded");
 });
+
+const pullCalls = async (harness: Awaited<ReturnType<typeof createHarness>>) =>
+  (await harness.calls()).filter((call) => call.argv[0] === "pull");
+
+/** Waits until climg was started `count` times for a pull (the call log is written when the process boots). */
+async function waitForPulls(harness: Awaited<ReturnType<typeof createHarness>>, count: number): Promise<void> {
+  for (let i = 0; i < 300 && (await pullCalls(harness)).length < count; i += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+test("queue: two pulls started together run one at a time, in order", async (t) => {
+  const harness = await createHarness(t, { env: { FAKE_CLIMG_JOB_MS: "300" }, config: { maxRunning: 1, maxQueued: 5 } });
+  const [first, second] = await Promise.all([
+    harness.service.jobs.start({ op: "pull", ref: "labhub:a" }),
+    harness.service.jobs.start({ op: "pull", ref: "labhub:b" })
+  ]);
+  assert.equal(first.state, "running");
+  assert.equal(first.queuePosition, undefined);
+  assert.equal(second.state, "queued");
+  assert.equal(second.queuePosition, 1);
+  await waitForPulls(harness, 1);
+  assert.equal((await pullCalls(harness)).length, 1, "only the first job spawned climg");
+
+  const listed = (await harness.service.jobs.list()).jobs;
+  assert.deepEqual(listed.map((job) => job.id), [first.id, second.id]);
+  assert.equal((await harness.service.jobs.list()).active, 2);
+
+  assert.equal((await untilEnded(harness, first.id)).state, "succeeded");
+  const ended = await untilEnded(harness, second.id);
+  assert.equal(ended.state, "succeeded");
+  assert.equal(ended.queuePosition, undefined);
+  const calls = await pullCalls(harness);
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].argv.includes("labhub:b"));
+});
+
+test("queue: cancelling a queued job spawns nothing and later jobs move up", async (t) => {
+  const harness = await createHarness(t, { env: { FAKE_CLIMG_JOB_MS: "20000" }, config: { maxRunning: 1, maxQueued: 5 } });
+  const first = await harness.service.jobs.start({ op: "pull", ref: "labhub:a" });
+  const second = await harness.service.jobs.start({ op: "pull", ref: "labhub:b" });
+  const third = await harness.service.jobs.start({ op: "pull", ref: "labhub:c" });
+  assert.deepEqual([second.queuePosition, third.queuePosition], [1, 2]);
+
+  const kill = t.mock.method(process, "kill", () => true);
+  const cancelled = await harness.service.jobs.cancel(second.id);
+  assert.equal(kill.mock.callCount(), 0, "no signal for a job without a process");
+  kill.mock.restore();
+  assert.equal(cancelled.state, "cancelled");
+  assert.equal((await harness.service.jobs.get(second.id)).state, "cancelled");
+  assert.equal((await harness.service.jobs.get(third.id)).queuePosition, 1);
+  await waitForPulls(harness, 1);
+  assert.equal((await pullCalls(harness)).length, 1);
+  await assert.rejects(harness.service.jobs.cancel(second.id), (error: unknown) => error instanceof ImagesError && error.code === "ended");
+
+  // The slot frees when the running job is cancelled: the third starts, the cancelled one never does.
+  await harness.service.jobs.cancel(first.id);
+  await waitForPulls(harness, 2);
+  const calls = await pullCalls(harness);
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].argv.includes("labhub:c") && !calls.some((call) => call.argv.includes("labhub:b")));
+  await harness.service.jobs.cancel(third.id);
+});
+
+test("queue: a failing job frees its slot for the next one", async (t) => {
+  const harness = await createHarness(t, { env: { FAKE_CLIMG_JOB_MS: "50" }, config: { maxRunning: 1, maxQueued: 5 } });
+  const failing = await harness.service.jobs.start({ op: "pull", ref: "labhub:fail" });
+  const next = await harness.service.jobs.start({ op: "pull", ref: "labhub:vios-1" });
+  assert.equal(next.state, "queued");
+  assert.equal((await untilEnded(harness, failing.id)).state, "failed");
+  assert.equal((await untilEnded(harness, next.id)).state, "succeeded");
+});
+
+test("queue: waiting jobs are capped, then a start is refused with 429 too_many_jobs", async (t) => {
+  const harness = await createHarness(t, { env: { FAKE_CLIMG_JOB_MS: "20000" }, config: { maxRunning: 1, maxQueued: 2 } });
+  const results = await Promise.allSettled(
+    Array.from({ length: 5 }, (_, index) => harness.service.jobs.start({ op: "pull", ref: `labhub:q${index}` }))
+  );
+  const accepted = results.filter((result): result is PromiseFulfilledResult<ImagesJob> => result.status === "fulfilled");
+  assert.equal(accepted.length, 3, "one running and two waiting");
+  assert.deepEqual(accepted.map((result) => result.value.state), ["running", "queued", "queued"]);
+  for (const result of results.filter((entry) => entry.status === "rejected")) {
+    const reason = (result as PromiseRejectedResult).reason;
+    assert.ok(reason instanceof ImagesError && reason.status === 429 && reason.code === "too_many_jobs", String(reason));
+  }
+  for (const result of [...accepted].reverse()) await harness.service.jobs.cancel(result.value.id);
+  await harness.service.jobs.idle(5000);
+});
+
+test("queue: WEB_LOCAL_IMAGES_MAX_RUNNING lets that many jobs run together", async (t) => {
+  const harness = await createHarness(t, { env: { FAKE_CLIMG_JOB_MS: "20000" }, config: { maxRunning: 2, maxQueued: 5 } });
+  const jobs = [];
+  for (const name of ["a", "b", "c"]) jobs.push(await harness.service.jobs.start({ op: "pull", ref: `labhub:${name}` }));
+  assert.deepEqual(jobs.map((job) => job.state), ["running", "running", "queued"]);
+  for (const job of [...jobs].reverse()) await harness.service.jobs.cancel(job.id);
+  await harness.service.jobs.idle(5000);
+});
+
+test("queue: a template add is a quick operation and is not queued behind a running pull", async (t) => {
+  const harness = await createHarness(t, { env: { FAKE_CLIMG_JOB_MS: "20000" }, config: { maxRunning: 1, maxQueued: 0 } });
+  const running = await harness.service.jobs.start({ op: "pull", ref: "labhub:a" });
+  const result = await harness.service.addTemplate("labhub:vios-1");
+  assert.equal(result.action, "add");
+  await harness.service.jobs.cancel(running.id);
+});
+
+test("queue: a queued job that never started is failed 'server restarted' after a restart", async (t) => {
+  const harness = await createHarness(t, { env: { FAKE_CLIMG_JOB_MS: "20000" }, config: { maxRunning: 1, maxQueued: 5 } });
+  const first = await harness.service.jobs.start({ op: "pull", ref: "labhub:a" });
+  const queued = await harness.service.jobs.start({ op: "pull", ref: "labhub:b" });
+  assert.equal(queued.state, "queued");
+  const restarted = await ImagesService.create({
+    config: harness.config, store: harness.store, mutex: harness.mutex, nodetplFile: harness.nodetplFile
+  });
+  const job = await restarted.jobs.get(queued.id);
+  assert.equal(job.state, "failed");
+  assert.equal(job.error, "server restarted");
+  assert.equal(job.queuePosition, undefined);
+  await assert.rejects(restarted.jobs.cancel(queued.id), (error: unknown) => error instanceof ImagesError && error.status === 409);
+  await harness.service.jobs.cancel(queued.id);
+  await harness.service.jobs.cancel(first.id);
+});
+
+test("search passes --all and --vendor to climg and returns vendor and folder", async (t) => {
+  const harness = await createHarness(t);
+  const records = await harness.service.search({ all: true, vendor: "h3c" });
+  const call = (await harness.calls()).at(-1)!;
+  assert.deepEqual(call.argv.slice(0, 5), ["search", "--json", "--vendor", "h3c", "--all"]);
+  assert.deepEqual(records.map((record) => record.key), ["labhub:h3cvsr1k-7.1.064-R1362P12", "labhub:h3cvswitch_S9850-7.1.070-R7639P06"]);
+  assert.equal(records[0].kind, null);
+  assert.equal(records[0].status, "unbuildable");
+  assert.equal(records[0].vendor, "H3C");
+  assert.equal(records[0].folder, "H3C/vSR");
+  assert.equal(records[1].folder, "H3C/vSW");
+  assert.equal((await harness.service.search({ q: "h3c" })).length, 0, "without --all the unbuildable entries stay out");
+  assert.equal((await harness.service.search({ q: "vsw", all: true })).length, 1, "keywords match the folder");
+  const index = await harness.service.index(false);
+  assert.deepEqual(index.vendors, [{ vendor: "Cisco", entries: 1, buildable: 1 }, { vendor: "H3C", entries: 2, buildable: 0 }]);
+});
+
+test("an older climg without vendor fields still works", async (t) => {
+  const legacy = await createHarness(t, { env: { FAKE_CLIMG_LEGACY: "1" } });
+  const records = await legacy.service.search({ all: true });
+  assert.equal(records.length, 1);
+  assert.equal("vendor" in records[0], false);
+  assert.equal("folder" in records[0], false);
+  assert.equal("vendors" in (await legacy.service.index(false)), false);
+});

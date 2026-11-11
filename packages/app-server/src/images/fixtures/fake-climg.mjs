@@ -50,9 +50,19 @@ const { command, options, positionals } = parse(argv);
 const imagesDir = env.FAKE_IMAGES_DIR ?? "/tmp/fake-images";
 const stateDir = env.CLIMG_STATE ?? "/tmp/fake-state";
 
+// FAKE_CLIMG_LEGACY=1 emits the records and the index like an older climg: no vendor, folder, model,
+// no unbuildable entries, no `vendors` in the index, and `--all`/`--vendor` change nothing.
+const LEGACY = Boolean(env.FAKE_CLIMG_LEGACY);
+const VENDOR_FIELDS = (vendor, folder, model) => (LEGACY ? {} : { vendor, folder, model });
+const EXTRA_RECORDS = [
+  { key: "labhub:h3cvsr1k-7.1.064-R1362P12", source: "labhub", status: "unbuildable", kind: null, version: null, name: "h3cvsr1k-7.1.064-R1362P12", size: 900, tag: null, detail: "", ...VENDOR_FIELDS("H3C", "H3C/vSR", "vSR") },
+  { key: "labhub:h3cvswitch_S9850-7.1.070-R7639P06", source: "labhub", status: "unbuildable", kind: null, version: null, name: "h3cvswitch_S9850-7.1.070-R7639P06", size: 800, tag: null, detail: "", ...VENDOR_FIELDS("H3C", "H3C/vSW", "vSW") },
+  { key: "local:custom.qcow2", source: "local", status: "cached", kind: "linux", version: "1", name: "custom.qcow2", size: 100, tag: "vrnetlab/linux:1", detail: "", ...VENDOR_FIELDS("Linux", null, null) }
+];
+
 const RECORD = {
   key: "labhub:vios-1", source: "labhub", status: "available", kind: "cisco_vios", version: "159-3.M3",
-  name: "vios-1", size: 1000, tag: "vrnetlab/cisco_vios:159-3.M3", detail: ""
+  name: "vios-1", size: 1000, tag: "vrnetlab/cisco_vios:159-3.M3", detail: "", ...VENDOR_FIELDS("Cisco", "Cisco/IOSv", "IOSv")
 };
 
 function templateEntry(tag) {
@@ -153,6 +163,17 @@ async function job() {
   out(result);
 }
 
+/** Like `climg search`: `--all` adds the unbuildable entries, `--vendor` is a case-insensitive match, keywords also match vendor and folder. */
+function search() {
+  let rows = LEGACY ? [RECORD] : [RECORD, ...EXTRA_RECORDS.filter((row) => options.has("--all") || row.status !== "unbuildable")];
+  const vendor = options.get("--vendor");
+  if (vendor && !LEGACY) rows = rows.filter((row) => (row.vendor ?? "").toLowerCase() === vendor.toLowerCase());
+  const words = positionals.map((word) => word.toLowerCase());
+  return rows.filter((row) =>
+    words.every((word) => [row.key, row.name, row.kind, row.version, row.vendor, row.folder].some((field) => String(field ?? "").toLowerCase().includes(word)))
+  );
+}
+
 switch (command) {
   case "config":
     out({
@@ -167,10 +188,13 @@ switch (command) {
     process.exit(env.FAKE_NO_KVM ? 1 : 0);
     break;
   case "index":
-    out({ release: "R1", age: "1h", counts: { QEMU: 1 }, buildable: 1 });
+    out({
+      release: "R1", age: "1h", counts: { QEMU: 1 }, buildable: 1,
+      ...(LEGACY ? {} : { vendors: [{ vendor: "Cisco", entries: 1, buildable: 1 }, { vendor: "H3C", entries: 2, buildable: 0 }] })
+    });
     break;
   case "search":
-    out([RECORD]);
+    out(search());
     break;
   case "show":
     if (positionals[0] === "labhub:nope") fail("not_found", "no LabHub entry");

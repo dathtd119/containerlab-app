@@ -47,6 +47,10 @@ export interface ImagesStatusResponse {
   uploadExtensions: string[];
   /** Jobs the server runs at once. */
   maxJobs: number;
+  /** Pull/build jobs that run at once; further ones wait in the server queue. */
+  maxRunning?: number;
+  /** Jobs that may wait in the queue. */
+  maxQueued?: number;
 }
 
 export type ImagesSource = "labhub" | "local" | "all";
@@ -63,6 +67,12 @@ export interface ImageRecord {
   size?: number;
   tag?: string;
   detail?: string;
+  /** Display vendor (`Cisco`, `H3C`); absent for an older `climg`. */
+  vendor?: string | null;
+  /** LabHub folder (`H3C/vSR`); null for local files, absent for an older `climg`. */
+  folder?: string | null;
+  /** Model within the vendor (`vSR`); null when unknown. */
+  model?: string | null;
   [field: string]: unknown;
 }
 
@@ -91,7 +101,15 @@ export interface ImagesIndexInfo {
   age?: string;
   counts?: Record<string, number>;
   buildable?: number;
+  /** Entries per vendor; absent for an older `climg`. */
+  vendors?: ImagesVendorCount[];
   [field: string]: unknown;
+}
+
+export interface ImagesVendorCount {
+  vendor: string;
+  entries: number;
+  buildable: number;
 }
 
 export interface ImagesSearchQuery {
@@ -101,7 +119,7 @@ export interface ImagesSearchQuery {
   vendor?: string;
   source?: ImagesSource;
   status?: ImagesRecordStatus;
-  /** Include entries without a buildable kind. */
+  /** Include entries without a buildable kind (`--all`). */
   all?: boolean;
 }
 
@@ -177,6 +195,8 @@ export interface ImagesJob {
   /** The Node Template step that follows a successful job. */
   nodetpl?: { name?: string; written: boolean; error?: string; kept?: string[] };
   cancelRequested?: boolean;
+  /** Place in the server queue (1 = next) while the job waits for a slot; absent otherwise. */
+  queuePosition?: number;
 }
 
 export interface ImagesJobsResponse {
