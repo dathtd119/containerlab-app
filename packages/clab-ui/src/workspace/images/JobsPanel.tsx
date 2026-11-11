@@ -54,12 +54,15 @@ function templateNote(job: ImagesJob): string | undefined {
   return `Node Template ${job.nodetpl.name} written${kept ? ` · ${kept}` : ""}`;
 }
 
-function JobRow({ job, onCancel }: { job: ImagesJob; onCancel: (job: ImagesJob) => void }) {
+function JobRow({ job, finishing, onCancel }: { job: ImagesJob; finishing: boolean; onCancel: (job: ImagesJob) => void }) {
   const active = isActiveJob(job);
   const [showAll, setShowAll] = useState(false);
   const lines = showAll ? job.log : job.log.slice(-LOG_LINES);
   const showLog = job.log.length > 0 && (active || job.state === "failed" || showAll);
   const note = templateNote(job);
+  let cancelLabel = "Cancel";
+  if (finishing) cancelLabel = "Finishing…";
+  else if (job.cancelRequested === true) cancelLabel = "Cancelling…";
   return (
     <Box
       component="li"
@@ -83,11 +86,11 @@ function JobRow({ job, onCancel }: { job: ImagesJob; onCancel: (job: ImagesJob) 
             variant="text"
             color="error"
             data-testid="images-job-cancel"
-            disabled={job.cancelRequested === true}
+            disabled={job.cancelRequested === true || finishing}
             onClick={() => onCancel(job)}
             sx={{ minWidth: 0, px: 1, flexShrink: 0 }}
           >
-            {job.cancelRequested === true ? "Cancelling…" : "Cancel"}
+            {cancelLabel}
           </Button>
         ) : null}
       </Box>
@@ -130,9 +133,11 @@ function JobRow({ job, onCancel }: { job: ImagesJob; onCancel: (job: ImagesJob) 
 }
 
 /** Running and recent jobs; they run on the server, so they are here again after a reload. */
-export function JobsPanel({ jobs, error, onCancel }: {
+export function JobsPanel({ jobs, error, finishing = [], onCancel }: {
   jobs: ImagesJob[];
   error?: string;
+  /** Ids of jobs that already exited and are settling; their Cancel is disabled. */
+  finishing?: readonly string[];
   onCancel: (job: ImagesJob) => void;
 }): React.JSX.Element {
   const active = jobs.filter(isActiveJob).length;
@@ -151,7 +156,7 @@ export function JobsPanel({ jobs, error, onCancel }: {
         </Typography>
       ) : (
         <Box component="ul" sx={{ m: 0, p: 0, overflowY: "auto", minHeight: 0 }}>
-          {jobs.map((job) => <JobRow key={job.id} job={job} onCancel={onCancel} />)}
+          {jobs.map((job) => <JobRow key={job.id} job={job} finishing={finishing.includes(job.id)} onCancel={onCancel} />)}
         </Box>
       )}
     </Box>

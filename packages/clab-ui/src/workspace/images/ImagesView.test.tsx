@@ -79,6 +79,12 @@ test("JobsPanel offers cancel only for active jobs and tails the log", () => {
   assert.match(html, /build failed/);
 });
 
+test("JobsPanel disables Cancel and says Finishing for a job that already exited", () => {
+  const html = render(<JobsPanel onCancel={noop} finishing={["1"]} jobs={[baseJob({ id: "1", ref: "labhub:a" })]} />);
+  assert.match(html, /<button[^>]*disabled=""[^>]*data-testid="images-job-cancel"/);
+  assert.match(html, /Finishing…/);
+});
+
 const templates: ImagesTemplate[] = [
   { name: "managed-present", kind: "arista_ceos", image: "ceos:1", managed: true, imagePresent: true },
   { name: "managed-missing", kind: "cisco_iol", image: "iol:1", managed: true, imagePresent: false },

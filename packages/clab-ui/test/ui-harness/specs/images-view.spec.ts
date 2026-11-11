@@ -65,6 +65,7 @@ test.describe("Images view", () => {
       "WEB_LOCAL_CLIMG_CONFIG",
       "WEB_LOCAL_CLIMG_STATE",
       "WEB_LOCAL_CLIMG_USER",
+      "WEB_LOCAL_CLIMG_HOME",
       "WEB_LOCAL_IMAGES_UPLOAD_MAX"
     ]);
     await expect(page.getByTestId("images-search-input")).toHaveCount(0);
@@ -83,7 +84,7 @@ test.describe("Images view", () => {
   test("unavailable is discovered from the status error", async ({ page }) => {
     await openImages(page, "state=error-unavailable");
     await expect(page.getByTestId("images-unavailable")).toBeVisible();
-    await expect(page.getByTestId("images-config-key")).toHaveCount(5);
+    await expect(page.getByTestId("images-config-key")).toHaveCount(6);
     await expect(page.getByTestId("images-search-input")).toHaveCount(0);
     expect((await calls(page)).some((entry) => entry.startsWith("status"))).toBe(true);
   });

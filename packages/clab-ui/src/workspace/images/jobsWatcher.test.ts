@@ -17,7 +17,7 @@ const job = (id: string, state: ImagesJobState, startedAt: string): ImagesJob =>
 });
 
 function setup(initial: ImagesJob[], options: { onJobEnded?: (job: ImagesJob) => void } = {}) {
-  const state = { jobs: initial, fail: false, cancelled: undefined as ImagesJob | undefined, started: undefined as ImagesJob | undefined };
+  const state = { jobs: initial, fail: false, cancelled: undefined as ImagesJob | undefined, started: undefined as ImagesJob | undefined, cancelError: undefined as Error | undefined };
   const timers: Array<{ run: () => void; ms: number; cleared: boolean }> = [];
   const client = {
     jobs: async () => {
@@ -25,7 +25,10 @@ function setup(initial: ImagesJob[], options: { onJobEnded?: (job: ImagesJob) =>
       return { jobs: state.jobs, active: 0 };
     },
     startJob: async () => state.started as ImagesJob,
-    cancelJob: async () => state.cancelled as ImagesJob
+    cancelJob: async () => {
+      if (state.cancelError) throw state.cancelError;
+      return state.cancelled as ImagesJob;
+    }
   };
   const watcher = createImagesJobsWatcher(client, {
     ...options,
@@ -126,4 +129,24 @@ test("dispose stops scheduling", async () => {
   const count = timers.length;
   await watcher.refresh();
   assert.equal(timers.length, count, "no new timer after dispose");
+});
+
+test("a 409 finishing cancel is not an error: the job is marked finishing until the poll shows its end", async () => {
+  const { state, pending, watcher } = setup([job("a", "running", "2024-01-01T00:00:00Z")]);
+  await watcher.refresh();
+  state.cancelError = Object.assign(new Error("finishing up"), { code: "finishing" });
+  await watcher.cancel("a");
+  assert.deepEqual(watcher.getSnapshot().finishing, ["a"]);
+  assert.equal(pending().length, 1);
+  state.jobs = [job("a", "succeeded", "2024-01-01T00:00:00Z")];
+  await watcher.refresh();
+  assert.deepEqual(watcher.getSnapshot().finishing, []);
+});
+
+test("other cancel failures still reject", async () => {
+  const { state, watcher } = setup([job("a", "running", "2024-01-01T00:00:00Z")]);
+  await watcher.refresh();
+  state.cancelError = Object.assign(new Error("not ours"), { code: "not_ours" });
+  await assert.rejects(watcher.cancel("a"), /not ours/);
+  assert.deepEqual(watcher.getSnapshot().finishing, []);
 });

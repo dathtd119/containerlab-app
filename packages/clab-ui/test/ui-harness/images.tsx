@@ -37,7 +37,7 @@ const LATENCY_MS = 150;
 const JOB_TICK_MS = 300;
 const GIB = 2 ** 30;
 
-const CONFIG_KEYS = ["WEB_LOCAL_CLIMG_PATH", "WEB_LOCAL_CLIMG_CONFIG", "WEB_LOCAL_CLIMG_STATE", "WEB_LOCAL_CLIMG_USER", "WEB_LOCAL_IMAGES_UPLOAD_MAX"];
+const CONFIG_KEYS = ["WEB_LOCAL_CLIMG_PATH", "WEB_LOCAL_CLIMG_CONFIG", "WEB_LOCAL_CLIMG_STATE", "WEB_LOCAL_CLIMG_USER", "WEB_LOCAL_CLIMG_HOME", "WEB_LOCAL_IMAGES_UPLOAD_MAX"];
 const NOT_CONFIGURED: ImagesUnavailableInfo = {
   reason: "unavailable",
   detail: "The image manager is not configured on this server. Set WEB_LOCAL_CLIMG_PATH (and the other WEB_LOCAL_CLIMG_* settings).",

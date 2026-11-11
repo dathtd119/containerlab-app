@@ -41,7 +41,7 @@ import type {
 } from "./types";
 
 const SEARCH_DELAY_MS = 250;
-const NO_JOBS: ImagesJobsSnapshot = { jobs: [], loaded: false };
+const NO_JOBS: ImagesJobsSnapshot = { jobs: [], loaded: false, finishing: [] };
 const noSubscribe = () => () => undefined;
 
 type Selection = { type: "record"; record: ImageRecord } | { type: "template"; template: ImagesTemplate } | undefined;
@@ -408,6 +408,7 @@ export function ImagesView({ client, jobs: watcher, endpointLabel, unavailable: 
             <JobsPanel
               jobs={jobs.jobs}
               error={jobs.error}
+              finishing={jobs.finishing}
               onCancel={(job) => {
                 if (watcher) watcher.cancel(job.id).catch((error: unknown) => setNotice({ severity: "error", message: errorMessage(error) }));
               }}

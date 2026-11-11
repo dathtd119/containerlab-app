@@ -11,6 +11,8 @@ export interface ImagesJobsSnapshot {
   /** The last list request failed; jobs keep their last known state. */
   error?: string;
   loaded: boolean;
+  /** Jobs whose cancel was refused because `climg` already exited; they settle on a following poll. */
+  finishing: string[];
 }
 
 export interface ImagesJobsWatcher {
@@ -45,7 +47,7 @@ export function createImagesJobsWatcher(
   const setTimer = options.setTimer ?? ((run, ms) => setTimeout(run, ms));
   const clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>));
   const listeners = new Set<() => void>();
-  let snapshot: ImagesJobsSnapshot = { jobs: [], loaded: false };
+  let snapshot: ImagesJobsSnapshot = { jobs: [], loaded: false, finishing: [] };
   let timer: unknown;
   let disposed = false;
   let inFlight: Promise<void> | undefined;
@@ -72,7 +74,8 @@ export function createImagesJobsWatcher(
       if (before && isActiveJob(before) && !isActiveJob(job)) options.onJobEnded?.(job);
     }
     const sorted = [...jobs].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-    emit({ jobs: sorted, loaded: true });
+    const finishing = snapshot.finishing.filter((id) => sorted.some((job) => job.id === id && isActiveJob(job)));
+    emit({ jobs: sorted, loaded: true, finishing });
   };
 
   function refresh(): Promise<void> {
@@ -107,7 +110,14 @@ export function createImagesJobsWatcher(
       return job;
     },
     async cancel(id) {
-      upsert(await client.cancelJob(id));
+      try {
+        upsert(await client.cancelJob(id));
+      } catch (error) {
+        // 409 "finishing": climg has exited and the job is about to settle, so there is nothing to cancel.
+        if ((error as { code?: unknown } | null)?.code !== "finishing") throw error;
+        if (!snapshot.finishing.includes(id)) emit({ ...snapshot, finishing: [...snapshot.finishing, id] });
+        schedule();
+      }
     },
     dispose() {
       disposed = true;
