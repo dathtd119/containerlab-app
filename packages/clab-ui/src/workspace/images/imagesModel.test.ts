@@ -31,7 +31,13 @@ test("recordRef returns a valid key as is", () => {
 });
 
 test("recordRef uses #id for a LabHub record whose key has spaces", () => {
-  assert.equal(recordRef(record({ key: "labhub:Cisco IOSv L2 2020", id: 77 })), "#77");
+  assert.equal(recordRef(record({ key: "labhub:Cisco IOSv L2 2020", id: 77, section: "QEMU" })), "#77");
+});
+
+test("recordRef gives a DYNAMIPS record with an invalid key no #id ref (ids collide with QEMU)", () => {
+  const dynamips = record({ key: "labhub:c7200-[1]-a3jk9s-mz.124-25g.image", id: 22, section: "DYNAMIPS" });
+  assert.equal(recordRef(dynamips), undefined);
+  assert.equal(recordRef({ ...dynamips, id: undefined }), undefined);
 });
 
 test("recordRef falls back to a valid docker tag, else undefined", () => {

@@ -67,6 +67,8 @@ export class JobRegistry {
   private readonly queue: LiveJob[] = [];
   /** Slots taken by `start()` calls that passed the cap check but have not registered their job yet. */
   private pending = 0;
+  /** The last queued meta-file write of each job (see `persist`). */
+  private readonly writes = new Map<string, Promise<void>>();
 
   constructor(private readonly options: JobRegistryOptions) {
     this.killAfterMs = options.killAfterMs ?? KILL_AFTER_MS;
@@ -133,7 +135,19 @@ export class JobRegistry {
     return jobs;
   }
 
-  private async persist(job: ImagesJob): Promise<void> {
+  /** Writes of one job are chained, so the last call wins on disk even when an earlier write is slower. */
+  private persist(job: ImagesJob): Promise<void> {
+    const previous = this.writes.get(job.id) ?? Promise.resolve();
+    const next = previous.then(() => this.write(job));
+    const tail = next.catch(() => undefined);
+    this.writes.set(job.id, tail);
+    void tail.then(() => {
+      if (this.writes.get(job.id) === tail) this.writes.delete(job.id);
+    });
+    return next;
+  }
+
+  private async write(job: ImagesJob): Promise<void> {
     const file = this.path(job.id, ".meta.json");
     const temp = `${file}.${randomUUID()}.tmp`;
     await fsp.writeFile(temp, `${JSON.stringify(job)}\n`, { mode: FILE_MODE });
@@ -291,6 +305,8 @@ export class JobRegistry {
       return position > 0 ? { ...job, queuePosition: position } : live.job;
     } finally {
       release();
+      // A launch that failed leaves its slot free for a job queued meanwhile (no-op when no slot is free).
+      this.pump();
     }
   }
 
@@ -496,7 +512,7 @@ export class JobRegistry {
   private async cancelQueued(live: LiveJob): Promise<ImagesJob> {
     const at = this.queue.indexOf(live);
     // Not in the queue any more: it is being started, and the next cancel finds a process.
-    if (at < 0) throw new ImagesError("Job is starting; try again in a moment", 409, "finishing");
+    if (at < 0) throw new ImagesError("Job is starting; try again in a moment", 409, "starting");
     this.queue.splice(at, 1);
     const now = new Date().toISOString();
     live.queued = false;

@@ -504,6 +504,24 @@ test("queue: a failing job frees its slot for the next one", async (t) => {
   assert.equal((await untilEnded(harness, next.id)).state, "succeeded");
 });
 
+test("queue: a launch that fails does not strand a job queued meanwhile", { skip: process.getuid?.() === 0 }, async (t) => {
+  const harness = await createHarness(t, { env: { FAKE_CLIMG_JOB_MS: "50" }, config: { maxRunning: 1, maxQueued: 5 } });
+  // A different owner makes chown fail with EPERM for a non-root server, so A's launch rejects.
+  const bad = { uid: (process.getuid?.() ?? 1000) + 1, gid: (process.getgid?.() ?? 1000) + 1 };
+  let launches = 0;
+  Object.defineProperty(harness.config, "runAs", { get: () => (launches++ === 0 ? bad : undefined) });
+  const first = assert.rejects(harness.service.jobs.start({ op: "pull", ref: "labhub:a" }));
+  const second = await harness.service.jobs.start({ op: "pull", ref: "labhub:b" });
+  assert.equal(second.state, "queued");
+  await first;
+  assert.equal((await untilEnded(harness, second.id)).state, "succeeded");
+  await harness.service.jobs.idle();
+  const third = await harness.service.jobs.start({ op: "pull", ref: "labhub:c" });
+  assert.equal(third.state, "running");
+  assert.equal(third.queuePosition, undefined);
+  assert.equal((await untilEnded(harness, third.id)).state, "succeeded");
+});
+
 test("queue: waiting jobs are capped, then a start is refused with 429 too_many_jobs", async (t) => {
   const harness = await createHarness(t, { env: { FAKE_CLIMG_JOB_MS: "20000" }, config: { maxRunning: 1, maxQueued: 2 } });
   const results = await Promise.allSettled(

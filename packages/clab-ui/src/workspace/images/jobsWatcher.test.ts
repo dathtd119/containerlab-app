@@ -143,6 +143,14 @@ test("a 409 finishing cancel is not an error: the job is marked finishing until 
   assert.deepEqual(watcher.getSnapshot().finishing, []);
 });
 
+test("a 409 starting cancel keeps Cancel available: the job is not marked finishing", async () => {
+  const { state, watcher } = setup([job("a", "running", "2024-01-01T00:00:00Z")]);
+  await watcher.refresh();
+  state.cancelError = Object.assign(new Error("starting"), { code: "starting" });
+  await watcher.cancel("a");
+  assert.deepEqual(watcher.getSnapshot().finishing, []);
+});
+
 test("other cancel failures still reject", async () => {
   const { state, watcher } = setup([job("a", "running", "2024-01-01T00:00:00Z")]);
   await watcher.refresh();

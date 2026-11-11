@@ -115,7 +115,13 @@ export function createImagesJobsWatcher(
         upsert(await client.cancelJob(id));
       } catch (error) {
         // 409 "finishing": climg has exited and the job is about to settle, so there is nothing to cancel.
-        if ((error as { code?: unknown } | null)?.code !== "finishing") throw error;
+        const code = (error as { code?: unknown } | null)?.code;
+        // 409 "starting": the job is being launched; Cancel stays enabled and works once it runs.
+        if (code === "starting") {
+          schedule();
+          return;
+        }
+        if (code !== "finishing") throw error;
         if (!snapshot.finishing.includes(id)) emit({ ...snapshot, finishing: [...snapshot.finishing, id] });
         schedule();
       }

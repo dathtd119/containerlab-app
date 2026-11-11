@@ -21,6 +21,12 @@ ALLOWED_HOSTS="${ALLOWED_HOSTS:-localhost,127.0.0.1,[::1]}"
 
 mkdir -p "$WORKSPACE/ui" "$CLIMG_STATE" "$IMAGES_DIR"
 
+# Forwarded only when set in the caller's environment; the server's defaults apply otherwise.
+LIMIT_ENV=()
+for var in WEB_LOCAL_IMAGES_UPLOAD_MAX WEB_LOCAL_IMAGES_MAX_RUNNING WEB_LOCAL_IMAGES_MAX_QUEUED; do
+  if [ -n "${!var+x}" ]; then LIMIT_ENV+=(-e "$var=${!var}"); fi
+done
+
 docker run -d --name "$NAME" \
   --user root --privileged --network host --pid host \
   -v /var/run/docker.sock:/var/run/docker.sock \
@@ -43,4 +49,5 @@ docker run -d --name "$NAME" \
   -e WEB_LOCAL_CLIMG_USER="$CLIMG_UID:$CLIMG_GID" \
   -e WEB_LOCAL_CLIMG_HOME="$CLIMG_HOME" \
   -e WEB_ALLOWED_HOSTS="$ALLOWED_HOSTS" \
+  ${LIMIT_ENV[@]+"${LIMIT_ENV[@]}"} \
   "$IMAGE"

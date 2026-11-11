@@ -246,7 +246,7 @@ export function SearchResults({ records, loading, error, filters, selectedKey, o
         </TableHead>
         <TableBody>
           {records.map((record) => (
-            <ResultRow key={record.key} record={record} selected={record.key === selectedKey} onSelect={onSelect} />
+            <ResultRow key={`${record.key}|${String(record.section ?? "")}|${String(record.id ?? "")}`} record={record} selected={record.key === selectedKey} onSelect={onSelect} />
           ))}
         </TableBody>
       </Table>

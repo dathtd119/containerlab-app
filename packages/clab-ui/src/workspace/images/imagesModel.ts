@@ -21,7 +21,8 @@ export const isValidTag = (value: string): boolean => value.length <= 255 && DOC
  */
 export function recordRef(record: ImageRecord): string | undefined {
   if (REF.test(record.key)) return record.key;
-  if (record.source === "labhub" && typeof record.id === "number") return `#${record.id}`;
+  // `#id` indexes the QEMU entries first: other sections reuse those ids, so they must not be addressed this way.
+  if (record.source === "labhub" && record.section === "QEMU" && typeof record.id === "number") return `#${record.id}`;
   if (typeof record.tag === "string" && DOCKER_REFERENCE.test(record.tag)) return record.tag;
   return undefined;
 }
