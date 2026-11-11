@@ -8,6 +8,8 @@ import CircularProgress from "@mui/material/CircularProgress";
 import IconButton from "@mui/material/IconButton";
 import InputAdornment from "@mui/material/InputAdornment";
 import MenuItem from "@mui/material/MenuItem";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import Switch from "@mui/material/Switch";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
@@ -19,7 +21,7 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 
 import { controlRadius } from "../../theme/surfaces";
-import { formatSize, recordName } from "./imagesModel";
+import { formatSize, isUnbuildable, recordFolder, recordName, recordVendor } from "./imagesModel";
 import { EmptyMessage, MONO_SX, StatusLabel, recordStatusHint, recordStatusLabel, recordTone } from "./imagesUi";
 import type { ImageRecord, ImagesIndexInfo, ImagesRecordStatus, ImagesSource } from "./types";
 
@@ -29,12 +31,15 @@ export interface SearchFilters {
   vendor: string;
   source: ImagesSource;
   status: "" | ImagesRecordStatus;
+  /** Also list entries without a buildable kind (`--all`). */
+  includeUnbuildable: boolean;
 }
 
-export const NO_FILTERS: SearchFilters = { q: "", kind: "", vendor: "", source: "all", status: "" };
+export const NO_FILTERS: SearchFilters = { q: "", kind: "", vendor: "", source: "all", status: "", includeUnbuildable: true };
 
 const filtersActive = (filters: SearchFilters): boolean =>
-  filters.q.trim() !== "" || filters.kind !== "" || filters.vendor !== "" || filters.source !== "all" || filters.status !== "";
+  filters.q.trim() !== "" || filters.kind !== "" || filters.vendor !== "" || filters.source !== "all" || filters.status !== "" ||
+  !filters.includeUnbuildable;
 
 const SOURCE_LABELS: Record<ImagesSource, string> = { all: "All", labhub: "LabHub", local: "Local files" };
 const STATUSES: ImagesRecordStatus[] = ["built", "cached", "available"];
@@ -114,6 +119,19 @@ export function SearchBar({ filters, kinds, vendors, index, indexBusy, onChange,
         options={[all, ...vendors.map((value) => ({ value, label: value }))]}
         onChange={(vendor) => onChange({ ...filters, vendor })}
       />
+      <FormControlLabel
+        label="Include not buildable"
+        control={
+          <Switch
+            size="small"
+            checked={filters.includeUnbuildable}
+            onChange={(event) => onChange({ ...filters, includeUnbuildable: event.target.checked })}
+            slotProps={{ input: { "aria-label": "Include not buildable", "data-testid": "images-include-unbuildable" } as React.InputHTMLAttributes<HTMLInputElement> }}
+          />
+        }
+        slotProps={{ typography: { variant: "body2", noWrap: true } }}
+        sx={{ mx: 0.5 }}
+      />
       {filtersActive(filters) ? <Button size="small" variant="text" onClick={() => onChange(NO_FILTERS)}>Clear</Button> : null}
       <Box sx={{ flex: 1 }} />
       <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
@@ -134,6 +152,9 @@ export function SearchBar({ filters, kinds, vendors, index, indexBusy, onChange,
 
 function ResultRow({ record, selected, onSelect }: { record: ImageRecord; selected: boolean; onSelect: (record: ImageRecord) => void }) {
   const name = recordName(record);
+  const vendor = recordVendor(record);
+  const folder = recordFolder(record);
+  const unbuildable = isUnbuildable(record);
   return (
     <TableRow
       hover
@@ -142,6 +163,7 @@ function ResultRow({ record, selected, onSelect }: { record: ImageRecord; select
       aria-selected={selected}
       data-testid="images-result-row"
       data-key={record.key}
+      data-buildable={unbuildable ? "false" : "true"}
       onClick={() => onSelect(record)}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -154,6 +176,12 @@ function ResultRow({ record, selected, onSelect }: { record: ImageRecord; select
       <TableCell sx={{ maxWidth: 0, width: "38%" }}>
         <Typography variant="body2" noWrap title={name} sx={{ fontWeight: 500 }}>{name}</Typography>
         <Typography variant="caption" component="p" noWrap title={record.key} sx={{ color: "text.secondary", ...MONO_SX }}>{record.key}</Typography>
+      </TableCell>
+      <TableCell sx={{ maxWidth: 0, width: "16%" }}>
+        <Typography variant="body2" noWrap title={vendor} data-testid="images-result-vendor">{vendor ?? "–"}</Typography>
+        {folder ? (
+          <Typography variant="caption" component="p" noWrap title={folder} data-testid="images-result-folder" sx={{ color: "text.secondary" }}>{folder}</Typography>
+        ) : null}
       </TableCell>
       <TableCell sx={{ ...MONO_SX, fontSize: 12, whiteSpace: "nowrap", overflowWrap: "normal" }}>{record.kind ?? "–"}</TableCell>
       <TableCell sx={{ ...MONO_SX, fontSize: 12, whiteSpace: "nowrap", overflowWrap: "normal" }}>{record.version ?? "–"}</TableCell>
@@ -208,6 +236,7 @@ export function SearchResults({ records, loading, error, filters, selectedKey, o
         <TableHead>
           <TableRow>
             <TableCell>Image</TableCell>
+            <TableCell>Vendor</TableCell>
             <TableCell>Kind</TableCell>
             <TableCell>Version</TableCell>
             <TableCell align="right">Size</TableCell>

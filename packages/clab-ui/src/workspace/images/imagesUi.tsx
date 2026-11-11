@@ -20,19 +20,23 @@ function toneColor(theme: Theme, tone: Tone): string {
 
 export const MONO_SX = { fontFamily: MONO_FONT_FAMILY, overflowWrap: "anywhere" } as const;
 
+/** Why Pull is off for an entry that has no buildable kind. */
+export const NOT_BUILDABLE_REASON = "No vrnetlab kind exists for this entry, so it cannot be pulled or built here. It is listed so it can be found.";
+
 const RECORD_TONES: Record<string, Tone> = { built: "success", cached: "info", available: "default" };
 const RECORD_LABELS: Record<string, string> = {
   built: "Built",
   cached: "Cached",
   available: "Available",
-  unbuildable: "No buildable kind",
+  unbuildable: "Not buildable",
   "missing-file": "File missing",
   noop: "Already built"
 };
 const RECORD_HINTS: Record<string, string> = {
   built: "The image is built and on this host.",
   cached: "The source file is on this host; it is not built yet.",
-  available: "On LabHub; pulling downloads and builds it."
+  available: "On LabHub; pulling downloads and builds it.",
+  unbuildable: NOT_BUILDABLE_REASON
 };
 
 export const recordTone = (status: string): Tone => RECORD_TONES[status] ?? "warning";

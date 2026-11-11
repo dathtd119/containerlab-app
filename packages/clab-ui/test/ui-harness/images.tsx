@@ -4,7 +4,8 @@
  * `empty`, `error-unavailable`. `?theme=light|dark` picks the theme.
  * `window.__IMAGES__` records the client calls for specs to read. The initial running
  * pull of the `ready` state stays at 42% so specs can cancel it; jobs started in the
- * page advance 20% per 300 ms and then succeed.
+ * page advance 20% per 300 ms and then succeed. The `ready` state also has one queued job (place 1)
+ * behind the running one, and two H3C entries without a buildable kind (listed because `all` is on).
  */
 import React from "react";
 import { createRoot } from "react-dom/client";
@@ -37,7 +38,7 @@ const LATENCY_MS = 150;
 const JOB_TICK_MS = 300;
 const GIB = 2 ** 30;
 
-const CONFIG_KEYS = ["WEB_LOCAL_CLIMG_PATH", "WEB_LOCAL_CLIMG_CONFIG", "WEB_LOCAL_CLIMG_STATE", "WEB_LOCAL_CLIMG_USER", "WEB_LOCAL_CLIMG_HOME", "WEB_LOCAL_IMAGES_UPLOAD_MAX"];
+const CONFIG_KEYS = ["WEB_LOCAL_CLIMG_PATH", "WEB_LOCAL_CLIMG_CONFIG", "WEB_LOCAL_CLIMG_STATE", "WEB_LOCAL_CLIMG_USER", "WEB_LOCAL_CLIMG_HOME", "WEB_LOCAL_IMAGES_UPLOAD_MAX", "WEB_LOCAL_IMAGES_MAX_RUNNING", "WEB_LOCAL_IMAGES_MAX_QUEUED"];
 const NOT_CONFIGURED: ImagesUnavailableInfo = {
   reason: "unavailable",
   detail: "The image manager is not configured on this server. Set WEB_LOCAL_CLIMG_PATH (and the other WEB_LOCAL_CLIMG_* settings).",
@@ -64,7 +65,21 @@ const fixtureRecords: Fixture[] = [
   { key: "local:vEOS64-lab-4.32.0F.qcow2", source: "local", status: "cached", kind: "arista_veos", version: "4.32.0F", size: 610_000_000, tag: "vrnetlab/arista_veos:4.32.0F", path: "/srv/images/vEOS64-lab-4.32.0F.qcow2" }
 ];
 
-const records: Fixture[] = state === "empty" ? [] : fixtureRecords.map((record) => ({ ...record }));
+const vendorByKind: Record<string, [string, string]> = {
+  cisco_vios: ["Cisco", "Cisco/IOSv"], cisco_csr1000v: ["Cisco", "Cisco/CSR1000v"], arista_veos: ["Arista", "Arista/vEOS"],
+  juniper_vjunosrouter: ["Juniper", "Juniper/vJunos"], nokia_sros: ["Nokia", "Nokia/SR OS"]
+};
+const withVendor = (record: Fixture): Fixture => {
+  const [vendor, folder] = vendorByKind[record.kind ?? ""] ?? [undefined, undefined];
+  if (vendor === undefined) return record;
+  return { ...record, vendor, folder: record.source === "local" ? null : folder };
+};
+const unbuildableRecords: Fixture[] = [
+  { key: "labhub:h3cvsr1k-7.1.064-R1362P12", source: "labhub", status: "unbuildable", kind: null, version: null, name: "h3cvsr1k-7.1.064-R1362P12", size: 700_000_000, detail: "", id: 901, section: "QEMU", vendor: "H3C", folder: "H3C/vSR", model: "vSR" },
+  { key: "labhub:h3cvswitch_S9850-7.1.070-R7639P06", source: "labhub", status: "unbuildable", kind: null, version: null, name: "h3cvswitch_S9850-7.1.070-R7639P06", size: 650_000_000, detail: "", id: 902, section: "QEMU", vendor: "H3C", folder: "H3C/vSW", model: "vSW" }
+];
+
+const records: Fixture[] = state === "empty" ? [] : [...fixtureRecords.map(withVendor), ...unbuildableRecords].map((record) => ({ ...record }));
 
 const templates: ImagesTemplate[] = [
   { name: "cisco-vios-159-3.M3", kind: "cisco_vios", image: "vrnetlab/cisco_vios:159-3.M3", icon: "router", managed: true, customized: true, imagePresent: true },
@@ -107,7 +122,13 @@ function fakeStatus(): ImagesStatus {
   };
 }
 
-const indexInfo: ImagesIndexInfo = { release: "2025.10.1", age: "3h12m", counts: { QEMU: 180, IOL: 12 }, buildable: 96 };
+const indexInfo: ImagesIndexInfo = {
+  release: "2025.10.1", age: "3h12m", counts: { QEMU: 180, IOL: 12 }, buildable: 96,
+  vendors: [
+    { vendor: "Cisco", entries: 3, buildable: 3 }, { vendor: "Arista", entries: 2, buildable: 2 }, { vendor: "Juniper", entries: 1, buildable: 1 },
+    { vendor: "Nokia", entries: 1, buildable: 1 }, { vendor: "H3C", entries: 2, buildable: 0 }
+  ]
+};
 
 // ---- helpers ----
 
@@ -118,16 +139,17 @@ function unavailableError(info: ImagesUnavailableInfo): Error {
 }
 
 function vendorOf(record: ImageRecord): string {
-  return (record.kind ?? "").split("_")[0] ?? "";
+  return (record.vendor ?? (record.kind ?? "").split("_")[0] ?? "").toLowerCase();
 }
 
 function matches(record: ImageRecord, query: ImagesSearchQuery): boolean {
   if (query.kind !== undefined && query.kind !== "" && record.kind !== query.kind) return false;
-  if (query.vendor !== undefined && query.vendor !== "" && vendorOf(record) !== query.vendor) return false;
+  if (query.vendor !== undefined && query.vendor !== "" && vendorOf(record) !== query.vendor.toLowerCase()) return false;
+  if (query.all !== true && record.status === "unbuildable") return false;
   if (query.source && query.source !== "all" && record.source !== query.source) return false;
   if (query.status && record.status !== query.status) return false;
   const words = (query.q ?? "").toLowerCase().split(/\s+/).filter(Boolean);
-  const haystack = [record.name, record.key, record.kind, record.version, record.tag].map((value) => String(value ?? "").toLowerCase());
+  const haystack = [record.name, record.key, record.kind, record.version, record.tag, record.vendor, record.folder].map((value) => String(value ?? "").toLowerCase());
   return words.every((word) => haystack.some((value) => value.includes(word)));
 }
 
@@ -233,6 +255,19 @@ if (state === "ready" || state === "nokvm") {
       log: ["resolving labhub:sros-25.7.R1", "mirror main: HTTP 206", "downloading 1.1 GB", "downloaded 462 MB of 1.1 GB"],
       startedAt: iso(-60_000),
       updatedAt: iso(-1_000)
+    },
+    {
+      id: "job-seed-queued",
+      op: "pull",
+      ref: "labhub:csr1000v-17.3",
+      state: "queued",
+      phase: "",
+      pct: null,
+      message: "queued",
+      log: [],
+      queuePosition: 1,
+      startedAt: iso(-30_000),
+      updatedAt: iso(-30_000)
     },
     {
       id: "job-seed-build",

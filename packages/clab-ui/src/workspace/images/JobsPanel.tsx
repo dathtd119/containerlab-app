@@ -5,7 +5,7 @@ import LinearProgress from "@mui/material/LinearProgress";
 import Typography from "@mui/material/Typography";
 
 import { MONO_FONT_FAMILY } from "../../theme/typography";
-import { jobTitle, keptFields, keptText } from "./imagesModel";
+import { jobTitle, keptFields, keptText, queueText } from "./imagesModel";
 import { PaneTitle, StatusDot, type Tone } from "./imagesUi";
 import { isActiveJob } from "./jobsWatcher";
 import type { ImagesJob } from "./types";
@@ -40,7 +40,7 @@ function startedLabel(iso: string): string {
 }
 
 function phaseText(job: ImagesJob): string {
-  if (job.state === "queued") return "waiting for a build slot";
+  if (job.state === "queued") return queueText(job) ?? "waiting for a build slot";
   if (!isActiveJob(job)) return job.error ?? job.message;
   const phase = PHASE_LABELS[job.phase] ?? job.phase;
   return [phase, job.pct === null ? undefined : `${Math.round(job.pct)} %`].filter(Boolean).join(" · ");
@@ -69,6 +69,7 @@ function JobRow({ job, finishing, onCancel }: { job: ImagesJob; finishing: boole
       data-testid="images-job"
       data-state={job.state}
       data-op={job.op}
+      data-queue-position={job.queuePosition}
       aria-label={jobTitle(job)}
       sx={{ listStyle: "none", px: 1.5, py: 1, borderTop: 1, borderColor: "divider", minWidth: 0 }}
     >

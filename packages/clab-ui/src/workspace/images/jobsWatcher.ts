@@ -1,3 +1,4 @@
+import { sortJobs } from "./imagesModel";
 import type { ImagesClient, ImagesJob } from "./types";
 
 const ACTIVE_STATES = new Set(["queued", "running"]);
@@ -73,7 +74,7 @@ export function createImagesJobsWatcher(
       const before = previous.get(job.id);
       if (before && isActiveJob(before) && !isActiveJob(job)) options.onJobEnded?.(job);
     }
-    const sorted = [...jobs].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    const sorted = sortJobs(jobs);
     const finishing = snapshot.finishing.filter((id) => sorted.some((job) => job.id === id && isActiveJob(job)));
     emit({ jobs: sorted, loaded: true, finishing });
   };
@@ -93,7 +94,7 @@ export function createImagesJobsWatcher(
 
   const upsert = (job: ImagesJob) => {
     const others = snapshot.jobs.filter((entry) => entry.id !== job.id);
-    emit({ ...snapshot, jobs: [job, ...others].sort((a, b) => b.startedAt.localeCompare(a.startedAt)) });
+    emit({ ...snapshot, jobs: sortJobs([job, ...others]) });
     schedule();
   };
 

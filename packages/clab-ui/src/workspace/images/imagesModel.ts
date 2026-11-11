@@ -1,6 +1,6 @@
 // Pure helpers of the Images view: how records are addressed, which host checks
 // block which action, and the numbers the confirmations show.
-import type { ImageRecord, ImagesDoctorCheck, ImagesJob, ImagesTemplate, ImagesUnavailableInfo } from "./types";
+import type { ImageRecord, ImagesDoctorCheck, ImagesIndexInfo, ImagesJob, ImagesTemplate, ImagesUnavailableInfo } from "./types";
 
 // The server's allow patterns (design D6); the view never sends what they refuse.
 const REF = /^(labhub:|local:)?[A-Za-z0-9#][A-Za-z0-9._@#+-]{0,199}$/;
@@ -47,7 +47,51 @@ export function builtTag(record: ImageRecord): string | undefined {
   return typeof record.tag === "string" ? record.tag : undefined;
 }
 
-export const vendorOfKind = (kind: string): string => kind.split("_", 1)[0] ?? kind;
+const vendorOfKind = (kind: string): string => kind.split("_", 1)[0] ?? kind;
+
+/** The vendor a record carries; absent for an older `climg` or a record without one. */
+export const recordVendor = (record: ImageRecord): string | undefined =>
+  typeof record.vendor === "string" && record.vendor !== "" ? record.vendor : undefined;
+
+export const recordFolder = (record: ImageRecord): string | undefined =>
+  typeof record.folder === "string" && record.folder !== "" ? record.folder : undefined;
+
+/** An entry no vrnetlab kind exists for: it is listed and findable, but cannot be pulled or built. */
+export const isUnbuildable = (record: ImageRecord): boolean => record.status === "unbuildable";
+
+/** Buildable records first, each group in the order `climg` listed them. */
+export function sortRecords(records: readonly ImageRecord[]): ImageRecord[] {
+  return [...records.filter((record) => !isUnbuildable(record)), ...records.filter(isUnbuildable)];
+}
+
+/**
+ * The vendors the filter offers: the index's list when `climg` reports one, else the vendors of the
+ * records seen, else (an older `climg`) the first part of their kinds.
+ */
+export function vendorOptions(index: ImagesIndexInfo | undefined, seen: readonly string[], kinds: readonly string[]): string[] {
+  const fromIndex = (index?.vendors ?? []).map((entry) => entry.vendor);
+  let names = fromIndex;
+  if (names.length === 0) names = [...seen];
+  if (names.length === 0) names = kinds.map(vendorOfKind);
+  return [...new Set(names)].sort((left, right) => left.localeCompare(right));
+}
+
+/** Running jobs first, then the queue in order, then ended jobs newest first. */
+export function sortJobs<T extends Pick<ImagesJob, "state" | "queuePosition" | "startedAt">>(jobs: readonly T[]): T[] {
+  const rank = (job: T) => ({ running: 0, queued: 1 })[job.state as "running" | "queued"] ?? 2;
+  return [...jobs].sort((left, right) => {
+    const byRank = rank(left) - rank(right);
+    if (byRank !== 0) return byRank;
+    if (rank(left) === 1) return (left.queuePosition ?? Number.MAX_SAFE_INTEGER) - (right.queuePosition ?? Number.MAX_SAFE_INTEGER);
+    return right.startedAt.localeCompare(left.startedAt);
+  });
+}
+
+/** `Next` for the job at the head of the queue, `N in line` behind it; undefined when the server gave no place. */
+export function queueText(job: Pick<ImagesJob, "state" | "queuePosition">): string | undefined {
+  if (job.state !== "queued" || job.queuePosition === undefined) return undefined;
+  return job.queuePosition <= 1 ? "Queued · Next" : `Queued · ${job.queuePosition} in line`;
+}
 
 export function canPull(record: ImageRecord): boolean {
   return record.source === "labhub" && (record.status === "available" || record.status === "cached" || record.status === "built");

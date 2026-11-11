@@ -66,7 +66,9 @@ test.describe("Images view", () => {
       "WEB_LOCAL_CLIMG_STATE",
       "WEB_LOCAL_CLIMG_USER",
       "WEB_LOCAL_CLIMG_HOME",
-      "WEB_LOCAL_IMAGES_UPLOAD_MAX"
+      "WEB_LOCAL_IMAGES_UPLOAD_MAX",
+      "WEB_LOCAL_IMAGES_MAX_RUNNING",
+      "WEB_LOCAL_IMAGES_MAX_QUEUED"
     ]);
     await expect(page.getByTestId("images-search-input")).toHaveCount(0);
     expect(errors).toEqual([]);
@@ -84,7 +86,7 @@ test.describe("Images view", () => {
   test("unavailable is discovered from the status error", async ({ page }) => {
     await openImages(page, "state=error-unavailable");
     await expect(page.getByTestId("images-unavailable")).toBeVisible();
-    await expect(page.getByTestId("images-config-key")).toHaveCount(6);
+    await expect(page.getByTestId("images-config-key")).toHaveCount(8);
     await expect(page.getByTestId("images-search-input")).toHaveCount(0);
     expect((await calls(page)).some((entry) => entry.startsWith("status"))).toBe(true);
   });
@@ -99,13 +101,13 @@ test.describe("Images view", () => {
     await expect(templateRow(page, "srl")).toHaveAttribute("data-present", "unknown");
     await expect(templateRow(page, "srl")).toHaveAttribute("data-managed", "false");
     await expect(page.getByTestId("images-index-age")).toContainText("3h12m");
-    await expect(page.getByTestId("images-job")).toHaveCount(2);
+    await expect(page.getByTestId("images-job")).toHaveCount(3);
     expect(errors).toEqual([]);
   });
 
   test("search narrows the results and a space-named record is shown by #id", async ({ page }) => {
     await openImages(page);
-    await expect(page.getByTestId("images-result-row")).toHaveCount(8);
+    await expect(page.getByTestId("images-result-row")).toHaveCount(10);
     await search(page, "vios");
     await expect(page.getByTestId("images-result-row")).toHaveCount(3);
     await expect(resultRow(page, "labhub:vios-159-3.M3")).toBeVisible();
@@ -118,7 +120,7 @@ test.describe("Images view", () => {
 
   test("a filter narrows the results", async ({ page }) => {
     await openImages(page);
-    await expect(page.getByTestId("images-result-row")).toHaveCount(8);
+    await expect(page.getByTestId("images-result-row")).toHaveCount(10);
     await chooseOption(page, "images-filter-status", "built");
     await expect(page.getByTestId("images-result-row")).toHaveCount(1);
     await expect(resultRow(page, "labhub:vjunos-router-23.4R1")).toBeVisible();
@@ -140,8 +142,8 @@ test.describe("Images view", () => {
     expect((await calls(page)).some((entry) => entry.startsWith("startJob"))).toBe(false);
     await page.getByTestId("images-pull-confirm-ok").click();
 
-    await expect(page.getByTestId("images-job")).toHaveCount(3);
-    const job = page.getByTestId("images-job").and(page.locator('[data-op="pull"]')).first();
+    await expect(page.getByTestId("images-job")).toHaveCount(4);
+    const job = page.getByTestId("images-job").and(page.locator('[aria-label="Pull labhub:vios-159-3.M2"]'));
     await expect(job).toHaveAttribute("data-state", "running");
     await expect(job).toHaveAttribute("data-state", "succeeded", { timeout: 15000 });
     expect((await calls(page)).some((entry) => entry.startsWith("startJob") && entry.includes("vios-159-3.M2"))).toBe(true);
@@ -154,6 +156,49 @@ test.describe("Images view", () => {
     await running.getByTestId("images-job-cancel").click();
     await expect(page.getByTestId("images-job").and(page.locator('[data-state="cancelled"]'))).toHaveCount(1);
     expect((await calls(page)).some((entry) => entry.startsWith("cancelJob"))).toBe(true);
+  });
+
+  test("every LabHub entry is listed with its vendor and folder; not buildable ones come last and cannot be pulled", async ({ page }) => {
+    await openImages(page);
+    const rows = page.getByTestId("images-result-row");
+    await expect(rows).toHaveCount(10);
+    const h3c = resultRow(page, "labhub:h3cvsr1k-7.1.064-R1362P12");
+    await expect(h3c).toHaveAttribute("data-buildable", "false");
+    await expect(h3c.getByTestId("images-result-vendor")).toHaveText("H3C");
+    await expect(h3c.getByTestId("images-result-folder")).toHaveText("H3C/vSR");
+    await expect(h3c).toContainText("Not buildable");
+    await expect(rows.nth(8)).toHaveAttribute("data-buildable", "false");
+    await expect(rows.nth(9)).toHaveAttribute("data-buildable", "false");
+    await expect(rows.nth(7)).toHaveAttribute("data-buildable", "true");
+    await h3c.click();
+    await expect(page.getByTestId("images-pull-button")).toBeDisabled();
+    expect((await calls(page)).some((entry) => entry.startsWith("search") && entry.includes('"all":true'))).toBe(true);
+  });
+
+  test("the vendor filter lists the index vendors, and the switch hides not buildable entries", async ({ page }) => {
+    await openImages(page);
+    await page.getByTestId("images-filter-vendor").click();
+    await expect(page.getByRole("option")).toHaveText(["All", "Arista", "Cisco", "H3C", "Juniper", "Nokia"]);
+    await page.getByRole("option", { name: "H3C", exact: true }).click();
+    await expect(page.getByTestId("images-result-row")).toHaveCount(2);
+    await page.getByTestId("images-include-unbuildable").click();
+    await expect(page.getByTestId("images-empty")).toBeVisible();
+    await page.getByTestId("images-include-unbuildable").click();
+    await expect(page.getByTestId("images-result-row")).toHaveCount(2);
+  });
+
+  test("the running job is first and a queued job shows its place and can be cancelled", async ({ page }) => {
+    await openImages(page);
+    const jobs = page.getByTestId("images-job");
+    await expect(jobs.first()).toHaveAttribute("data-state", "running");
+    await expect(jobs.first().getByTestId("images-job-log")).toBeVisible();
+    const queued = jobs.and(page.locator('[data-state="queued"]'));
+    await expect(queued).toHaveCount(1);
+    await expect(queued).toContainText("Queued · Next");
+    await expect(queued.getByTestId("images-job-cancel")).toBeEnabled();
+    await queued.getByTestId("images-job-cancel").click();
+    await expect(jobs.and(page.locator('[data-state="cancelled"]'))).toHaveCount(1);
+    await expect(jobs.first()).toHaveAttribute("data-state", "running");
   });
 
   test("upload shows progress, adds a local record and leads to build", async ({ page }) => {
@@ -260,7 +305,7 @@ test("screenshots", async ({ page }) => {
     await expect(page.getByTestId("images-pull-confirm")).toBeVisible();
     await shot("images-pull-confirm", theme);
     await page.getByTestId("images-pull-confirm-ok").click();
-    await expect(page.getByTestId("images-job")).toHaveCount(3);
+    await expect(page.getByTestId("images-job")).toHaveCount(4);
     await shot("images-jobs", theme);
 
     await page.reload();

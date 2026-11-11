@@ -55,7 +55,18 @@ export interface ImageRecord {
   size?: number;
   tag?: string;
   detail?: string;
+  /** Display vendor (`Cisco`, `H3C`); absent for an older `climg`. */
+  vendor?: string | null;
+  /** LabHub folder (`H3C/vSR`); null for local files, absent for an older `climg`. */
+  folder?: string | null;
+  model?: string | null;
   [field: string]: unknown;
+}
+
+export interface ImagesVendorCount {
+  vendor: string;
+  entries: number;
+  buildable: number;
 }
 
 export interface ImagesIndexInfo {
@@ -63,6 +74,8 @@ export interface ImagesIndexInfo {
   age?: string;
   counts?: Record<string, number>;
   buildable?: number;
+  /** Entries per vendor; absent for an older `climg`. */
+  vendors?: ImagesVendorCount[];
   [field: string]: unknown;
 }
 
@@ -144,6 +157,8 @@ export interface ImagesJob {
   exitCode?: number | null;
   nodetpl?: { name?: string; written: boolean; error?: string; kept?: string[] };
   cancelRequested?: boolean;
+  /** Place in the server queue (1 = next) while the job waits for a slot. */
+  queuePosition?: number;
 }
 
 export interface ImagesUploadResult {

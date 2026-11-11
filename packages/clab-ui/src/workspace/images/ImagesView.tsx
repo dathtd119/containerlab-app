@@ -23,8 +23,9 @@ import {
   freeDiskBytes,
   localFileName,
   recordRef,
+  sortRecords,
   unavailableOf,
-  vendorOfKind
+  vendorOptions
 } from "./imagesModel";
 import { UnavailablePanel } from "./imagesUi";
 import { JobsPanel } from "./JobsPanel";
@@ -65,7 +66,8 @@ function searchQuery(filters: SearchFilters) {
     ...(filters.kind ? { kind: filters.kind } : {}),
     ...(filters.vendor ? { vendor: filters.vendor } : {}),
     ...(filters.source !== "all" ? { source: filters.source } : {}),
-    ...(filters.status ? { status: filters.status } : {})
+    ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.includeUnbuildable ? { all: true } : {})
   };
 }
 
@@ -121,6 +123,7 @@ function useImageSearch(client: ImagesClient | undefined, filters: SearchFilters
   const [error, setError] = useState<string>();
   const [revision, setRevision] = useState(0);
   const [kinds, setKinds] = useState<string[]>([]);
+  const [vendors, setVendors] = useState<string[]>([]);
   const query = useMemo(() => searchQuery(filters), [filters]);
 
   useEffect(() => {
@@ -130,8 +133,13 @@ function useImageSearch(client: ImagesClient | undefined, filters: SearchFilters
     const timer = setTimeout(() => {
       client.search(query, controller.signal)
         .then((next) => {
-          setRecords(next);
+          setRecords(sortRecords(next));
           setError(undefined);
+          setVendors((known) => {
+            const merged = new Set(known);
+            for (const record of next) if (record.vendor) merged.add(record.vendor);
+            return merged.size === known.length ? known : [...merged].sort();
+          });
           setKinds((known) => {
             const merged = new Set(known);
             for (const record of next) if (record.kind) merged.add(record.kind);
@@ -154,7 +162,7 @@ function useImageSearch(client: ImagesClient | undefined, filters: SearchFilters
   }, [client, enabled, query, revision]);
 
   const reload = useCallback(() => setRevision((value) => value + 1), []);
-  return { records, loading, error, kinds, reload };
+  return { records, loading, error, kinds, vendors, reload };
 }
 
 /** `climg show` for the selected record. */
@@ -300,7 +308,7 @@ export function ImagesView({ client, jobs: watcher, endpointLabel, unavailable: 
     for (const template of basics.templates) if (template.kind) all.add(template.kind);
     return [...all].sort();
   }, [search.kinds, basics.templates]);
-  const vendors = useMemo(() => [...new Set(search.kinds.map(vendorOfKind))].sort(), [search.kinds]);
+  const vendors = useMemo(() => vendorOptions(basics.index, search.vendors, search.kinds), [basics.index, search.vendors, search.kinds]);
 
   const pullBlocked = blockedReason(checks, "pull");
   const buildBlocked = blockedReason(checks, "build");

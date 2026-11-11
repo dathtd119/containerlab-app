@@ -15,8 +15,8 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 
 import { getKindImageGuidance } from "../../image-manager/kindGuidance";
-import { builtTag, canBuild, canPull, formatSize, linkedTemplate, recordName } from "./imagesModel";
-import { Field, MONO_SX, StatusLabel, recordStatusHint, recordStatusLabel, recordTone } from "./imagesUi";
+import { builtTag, canBuild, canPull, formatSize, isUnbuildable, linkedTemplate, recordFolder, recordName, recordVendor } from "./imagesModel";
+import { Field, MONO_SX, NOT_BUILDABLE_REASON, StatusLabel, recordStatusHint, recordStatusLabel, recordTone } from "./imagesUi";
 import { presenceOf } from "./TemplateList";
 import type { ImageRecord, ImagesTemplate } from "./types";
 
@@ -146,6 +146,16 @@ export function ImageDetails({ record, full, loading, error, templates, actions,
             onClick={() => actions.onPull(shown)}
           />
         ) : null}
+        {shown.source === "labhub" && isUnbuildable(shown) ? (
+          <ActionButton
+            label="Pull and build"
+            icon={<CloudDownloadOutlinedIcon fontSize="small" />}
+            testId="images-pull-button"
+            variant="outlined"
+            disabledReason={NOT_BUILDABLE_REASON}
+            onClick={() => undefined}
+          />
+        ) : null}
         {canBuild(shown) ? (
           <ActionButton
             label="Register and build"
@@ -171,6 +181,8 @@ export function ImageDetails({ record, full, loading, error, templates, actions,
         <Box component="dl" sx={DL_SX}>
           <Field label="Key" mono>{shown.key}</Field>
           {typeof shown.id === "number" ? <Field label="LabHub entry" mono>#{shown.id}{typeof shown.section === "string" ? ` · ${shown.section}` : ""}</Field> : null}
+          {recordVendor(shown) ? <Field label="Vendor">{recordVendor(shown)}</Field> : null}
+          {recordFolder(shown) ? <Field label="Folder" mono>{recordFolder(shown)}</Field> : null}
           <Field label="Kind" mono>{shown.kind ?? "no buildable kind"}</Field>
           <Field label="Version" mono>{shown.version ?? "–"}</Field>
           <Field label="Size">{formatSize(shown.size)}</Field>

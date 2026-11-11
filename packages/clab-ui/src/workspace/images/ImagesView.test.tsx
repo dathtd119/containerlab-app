@@ -5,8 +5,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 
 import { ImageDetails, TemplateDetails, type RecordActions } from "./ImageDetails";
+import { NO_FILTERS, SearchBar, SearchResults } from "./ImageSearch";
 import { UnavailablePanel } from "./imagesUi";
 import { ImagesView } from "./ImagesView";
+import { sortJobs } from "./imagesModel";
 import { JobsPanel } from "./JobsPanel";
 import { TemplateList } from "./TemplateList";
 import type { ImageRecord, ImagesJob, ImagesTemplate } from "./types";
@@ -173,4 +175,80 @@ test("JobsPanel shows the fields climg kept on the job result line", () => {
   const without = render(<JobsPanel onCancel={noop} jobs={[{ ...withKept, nodetpl: { name: "tpl-a", written: true } }]} />);
   assert.match(without, /Node Template tpl-a written</);
   assert.doesNotMatch(without, /kept your/);
+});
+
+const h3c: ImageRecord = {
+  key: "labhub:h3cvsr1k-7.1.064-R1362P12", source: "labhub", status: "unbuildable", kind: null, name: "h3cvsr1k-7.1.064-R1362P12",
+  vendor: "H3C", folder: "H3C/vSR", model: "vSR"
+};
+const vios: ImageRecord = { key: "labhub:vios", source: "labhub", status: "available", kind: "cisco_vios", vendor: "Cisco", folder: "Cisco/IOSv" };
+const results = (records: ImageRecord[]): string =>
+  render(<SearchResults records={records} loading={false} filters={NO_FILTERS} onSelect={noop} onClearFilters={noop} />);
+
+test("search results show vendor and folder, and mark entries that are not buildable", () => {
+  const html = results([vios, h3c]);
+  assert.match(html, /data-testid="images-result-vendor"[^>]*>H3C</);
+  assert.match(html, /data-testid="images-result-folder"[^>]*>H3C\/vSR</);
+  const rows = html.match(/<tr[^>]*data-testid="images-result-row"[^>]*>.*?<\/tr>/g) ?? [];
+  assert.equal(rows.length, 2);
+  assert.match(rows[0] ?? "", /data-buildable="true"/);
+  assert.match(rows[1] ?? "", /data-buildable="false"/);
+  assert.match(rows[1] ?? "", />Not buildable</);
+  assert.doesNotMatch(rows[0] ?? "", /Not buildable/);
+});
+
+test("a record without vendor or folder (an older climg) shows a dash and no folder line", () => {
+  const html = results([{ key: "local:a.qcow2", source: "local", status: "cached", kind: "arista_veos" }]);
+  assert.match(html, /data-testid="images-result-vendor"[^>]*>–</);
+  assert.doesNotMatch(html, /images-result-folder/);
+});
+
+test("ImageDetails of a not buildable entry shows vendor and folder and a disabled Pull with the reason", () => {
+  const html = details(h3c, []);
+  assert.match(html, /H3C\/vSR/);
+  const button = html.match(/<button[^>]*data-testid="images-pull-button"[^>]*>/)?.[0] ?? "";
+  assert.match(button, /disabled/);
+  assert.match(html, /Not buildable/);
+  assert.match(html, /aria-label="No vrnetlab kind exists/);
+});
+
+test("the search bar has an Include not buildable switch that is on by default", () => {
+  const props = { kinds: [], vendors: ["Cisco", "H3C"], indexBusy: false, onChange: noop, onRefreshIndex: noop };
+  const on = render(<SearchBar filters={NO_FILTERS} {...props} />);
+  assert.match(on, /<input[^>]*data-testid="images-include-unbuildable"[^>]*>/);
+  assert.match(on.match(/<input[^>]*data-testid="images-include-unbuildable"[^>]*>/)?.[0] ?? "", /checked/);
+  assert.match(on, /Include not buildable/);
+  const off = render(<SearchBar filters={{ ...NO_FILTERS, includeUnbuildable: false }} {...props} />);
+  assert.doesNotMatch(off.match(/<input[^>]*data-testid="images-include-unbuildable"[^>]*>/)?.[0] ?? "", /checked/);
+  assert.match(off, /Clear/, "turning it off counts as a filter");
+});
+
+test("JobsPanel lists the running job first with its log, and queued jobs with their place and an enabled Cancel", () => {
+  const html = render(
+    <JobsPanel
+      onCancel={noop}
+      jobs={sortJobs([
+        baseJob({ id: "q2", ref: "labhub:c", state: "queued", queuePosition: 2, startedAt: "2024-01-01T10:02:00Z" }),
+        baseJob({ id: "done", ref: "labhub:z", state: "succeeded", message: "ok", startedAt: "2024-01-01T09:00:00Z" }),
+        baseJob({ id: "q1", ref: "labhub:b", state: "queued", queuePosition: 1, startedAt: "2024-01-01T10:01:00Z" }),
+        baseJob({ id: "run", ref: "labhub:a", pct: 40, log: ["downloading"], startedAt: "2024-01-01T10:00:00Z" })
+      ])}
+    />
+  );
+  const order = [...html.matchAll(/data-state="(\w+)"/g)].map((match) => match[1]);
+  assert.deepEqual(order, ["running", "queued", "queued", "succeeded"]);
+  assert.match(html, /Queued · Next/);
+  assert.match(html, /Queued · 2 in line/);
+  const queued = html.match(/<li[^>]*data-state="queued"[^>]*>.*?<\/li>/g) ?? [];
+  for (const row of queued) {
+    assert.match(row, /data-testid="images-job-cancel"/);
+    assert.doesNotMatch(row.match(/<button[^>]*data-testid="images-job-cancel"[^>]*>/)?.[0] ?? "", /disabled/);
+  }
+  assert.match(html.match(/<li[^>]*data-state="running"[^>]*>.*?<\/li>/)?.[0] ?? "", /data-testid="images-job-log"[^>]*>downloading</);
+});
+
+test("a queued job without a place from the server says it waits for a slot", () => {
+  const html = render(<JobsPanel onCancel={noop} jobs={[baseJob({ id: "q", ref: "labhub:b", state: "queued" })]} />);
+  assert.match(html, /waiting for a build slot/);
+  assert.doesNotMatch(html, /in line|Next/);
 });

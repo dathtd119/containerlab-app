@@ -7,6 +7,11 @@ import {
   canPull,
   formatSize,
   freeDiskBytes,
+  isUnbuildable,
+  queueText,
+  sortJobs,
+  sortRecords,
+  vendorOptions,
   keptFields,
   keptMissingImage,
   keptText,
@@ -151,4 +156,38 @@ test("keptMissingImage picks the edited templates skipped for a missing image", 
     { reason: "edited by user; image missing" }
   ];
   assert.deepEqual(keptMissingImage(skipped), ["a"]);
+});
+
+test("sortRecords puts not buildable entries after buildable ones, keeping each group's order", () => {
+  const rows = [record({ key: "a", status: "unbuildable" }), record({ key: "b" }), record({ key: "c", status: "unbuildable" }), record({ key: "d", status: "built" })];
+  assert.deepEqual(sortRecords(rows).map((row) => row.key), ["b", "d", "a", "c"]);
+  assert.equal(isUnbuildable(rows[0] as ImageRecord), true);
+});
+
+test("vendorOptions prefers the index vendors, then the vendors of the results, then the kinds", () => {
+  const index = { vendors: [{ vendor: "H3C", entries: 2, buildable: 0 }, { vendor: "Cisco", entries: 5, buildable: 5 }] };
+  assert.deepEqual(vendorOptions(index, ["Nokia"], ["arista_veos"]), ["Cisco", "H3C"]);
+  assert.deepEqual(vendorOptions({}, ["Nokia", "Cisco"], ["arista_veos"]), ["Cisco", "Nokia"]);
+  assert.deepEqual(vendorOptions(undefined, [], ["arista_veos", "arista_ceos", "cisco_iol"]), ["arista", "cisco"]);
+});
+
+test("sortJobs: running first, then the queue by place, then ended jobs newest first", () => {
+  const job = (id: string, state: "running" | "queued" | "succeeded", startedAt: string, queuePosition?: number) => ({
+    id, state, startedAt, ...(queuePosition !== undefined ? { queuePosition } : {})
+  });
+  const sorted = sortJobs([
+    job("old", "succeeded", "2024-01-01T08:00:00Z"),
+    job("q2", "queued", "2024-01-01T10:05:00Z", 2),
+    job("new", "succeeded", "2024-01-01T09:00:00Z"),
+    job("run", "running", "2024-01-01T10:00:00Z"),
+    job("q1", "queued", "2024-01-01T10:09:00Z", 1)
+  ]);
+  assert.deepEqual(sorted.map((entry) => entry.id), ["run", "q1", "q2", "new", "old"]);
+});
+
+test("queueText says Next for the head of the queue and N in line behind it", () => {
+  assert.equal(queueText({ state: "queued", queuePosition: 1 }), "Queued · Next");
+  assert.equal(queueText({ state: "queued", queuePosition: 3 }), "Queued · 3 in line");
+  assert.equal(queueText({ state: "queued" }), undefined);
+  assert.equal(queueText({ state: "running", queuePosition: 1 }), undefined);
 });
